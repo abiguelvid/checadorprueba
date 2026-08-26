@@ -162,6 +162,68 @@ input[type=range]{flex:1;accent-color:var(--green-deep);}
 
 .view{display:none;}
 .view.active{display:block;}
+
+.section-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--green-deep);margin-bottom:1rem;}
+.field-hint{font-size:.76rem;color:var(--ink-faint);font-weight:400;margin-top:-.35rem;margin-bottom:.6rem;display:block;}
+.row-2{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+.row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;}
+.field-block{margin-bottom:1.1rem;}
+.field-block:last-child{margin-bottom:0;}
+textarea.text-input{resize:vertical;font-family:inherit;}
+
+.add-link{
+  font-size:.83rem;color:var(--green-deep);font-weight:650;cursor:pointer;
+  display:inline-flex;align-items:center;gap:.3rem;margin-top:.4rem;
+}
+.add-link:hover{text-decoration:underline;}
+
+.repeat-block{
+  border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:1.2rem 1.3rem;
+  margin-bottom:1rem;position:relative;
+}
+.repeat-block .remove-block-btn{
+  position:absolute;top:.7rem;right:.8rem;background:none;border:none;color:var(--ink-faint);
+  cursor:pointer;font-size:1.2rem;line-height:1;
+}
+.repeat-block .remove-block-btn:hover{color:#993C1D;}
+.repeat-block-title{font-size:.78rem;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.9rem;}
+
+.mic-row{display:flex;gap:.6rem;align-items:flex-start;}
+.mic-row textarea{flex:1;}
+.mic-btn{
+  width:42px;height:42px;border-radius:10px;border:1.5px solid var(--line);background:var(--paper);
+  cursor:pointer;font-size:1.05rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.mic-btn.recording{background:#993C1D;border-color:#993C1D;color:#fff;animation:pulse 1s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(153,60,29,.4);}70%{box-shadow:0 0 0 8px rgba(153,60,29,0);}100%{box-shadow:0 0 0 0 rgba(153,60,29,0);}}
+
+.foto-dropzone{
+  border:2px dashed var(--line);border-radius:var(--radius-sm);padding:1.4rem;text-align:center;
+  cursor:pointer;font-size:.85rem;color:var(--ink-faint);
+}
+.foto-dropzone:hover{border-color:var(--green-deep);}
+.foto-grid{display:flex;flex-direction:column;gap:.8rem;margin-top:.9rem;}
+.foto-item{
+  display:flex;gap:1rem;align-items:flex-start;border:1.5px solid var(--line);
+  border-radius:var(--radius-sm);padding:.9rem 1rem;
+}
+.foto-thumb{
+  width:64px;height:64px;flex-shrink:0;border-radius:8px;background:var(--green-light);display:flex;align-items:center;
+  justify-content:center;font-size:.7rem;color:var(--green-deep);font-weight:700;position:relative;overflow:hidden;
+}
+.foto-thumb .rm{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.5);color:#fff;border:none;
+  border-radius:50%;width:16px;height:16px;font-size:.65rem;cursor:pointer;line-height:1;}
+.foto-item-body{flex:1;min-width:0;}
+.foto-momento-row{display:flex;gap:.4rem;margin-bottom:.6rem;}
+.foto-momento-row .chip-btn{padding:.35rem .8rem;font-size:.78rem;}
+.foto-comentario{padding:.6rem .8rem;font-size:.85rem;}
+.foto-count{font-size:.78rem;color:var(--ink-faint);margin-top:.6rem;}
+.foto-count.limit{color:#993C1D;font-weight:650;}
+
+.validacion-note{
+  background:var(--amber-human-bg);color:var(--amber-human);border-radius:var(--radius-sm);
+  padding:.9rem 1.1rem;font-size:.82rem;line-height:1.5;margin-top:1rem;
+}
 </style>
 </head>
 <body>
@@ -174,17 +236,17 @@ input[type=range]{flex:1;accent-color:var(--green-deep);}
 
   <div class="kicker">Agrobotanix · Registro de observación</div>
   <h1>Registrar observación</h1>
-  <p class="sub">Sirve tanto para reportes de campo como para avances de pruebas en laboratorio. Cada observación se guarda con fecha, ligada al cultivo específico — así se arma la línea de tiempo completa de cada experimento.</p>
+  <p class="sub">Sirve tanto para reportes de campo como para avances de pruebas en laboratorio. Cada observación se guarda con fecha, ligada al cultivo específico — así se arma la línea de tiempo completa de cada prueba de campo.</p>
 
   <div class="view active" id="view-start">
     <div class="choice-row">
       <div class="choice-card" onclick="goTo('existing-list')">
         <h3>Cultivo existente</h3>
-        <p>Agregar una nueva observación a un cultivo que ya tiene historial — por ejemplo, la segunda etapa de un experimento.</p>
+        <p>Agregar una nueva observación a un cultivo que ya tiene historial — por ejemplo, la segunda etapa de una prueba de campo.</p>
       </div>
       <div class="choice-card" onclick="goTo('new-form')">
         <h3>Cultivo nuevo</h3>
-        <p>Registrar un cultivo o experimento que todavía no existe en el sistema.</p>
+        <p>Registrar un cultivo o prueba de campo que todavía no existe en el sistema.</p>
       </div>
     </div>
   </div>
@@ -213,7 +275,7 @@ input[type=range]{flex:1;accent-color:var(--green-deep);}
     <span class="back-link" onclick="goTo('start')">&larr; Volver</span>
     <div class="card">
       <span class="field-label">Título</span>
-      <input type="text" class="text-input" id="nuevoTitulo" placeholder='Ej. "Finca cafetalera Jiménez" o "Experimento de campo 3 — Chiapas"'>
+      <input type="text" class="text-input" id="nuevoTitulo" placeholder='Ej. "Finca cafetalera Jiménez" o "Prueba de campo 3 — Chiapas"'>
     </div>
     <div class="card">
       <span class="field-label">Ubicación (coordenadas)</span>
@@ -229,6 +291,11 @@ input[type=range]{flex:1;accent-color:var(--green-deep);}
         <select id="nuevoCultivoTipo"></select>
       </div>
     </div>
+    <div class="card">
+      <span class="field-label">Variedad</span>
+      <span class="field-hint">De la planta — ej. "Hass", "Bourbon"</span>
+      <input type="text" class="text-input" id="nuevaVariedad" placeholder="Ej. Hass">
+    </div>
     <button class="save-btn" id="crearBtn">Crear y continuar</button>
   </div>
 
@@ -241,6 +308,50 @@ input[type=range]{flex:1;accent-color:var(--green-deep);}
     </div>
 
     <div class="card">
+      <div class="section-title">Condiciones de la visita</div>
+      <div class="row-3 field-block">
+        <div>
+          <span class="field-label">Temperatura</span>
+          <div class="num-input"><input type="number" class="text-input" id="temperatura" placeholder="0"><span class="unit">°C</span></div>
+        </div>
+        <div>
+          <span class="field-label">Humedad relativa</span>
+          <div class="num-input"><input type="number" class="text-input" id="humedadRelativa" placeholder="0"><span class="unit">%</span></div>
+        </div>
+        <div>
+          <span class="field-label">Lluvia / precipitación reciente</span>
+          <input type="text" class="text-input" id="precipitacionLluvia" placeholder="Ej. Llovió fuerte hace 3 días">
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Estado actual del cultivo</span>
+        <textarea class="text-input" id="estadoActualCultivo" rows="2" placeholder="¿Cómo se encuentra el cultivo actualmente?"></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Paquete tecnológico actual</span>
+        <span class="field-hint">¿Qué están usando actualmente en este lugar?</span>
+        <textarea class="text-input" id="paqueteTecnologico" rows="2" placeholder="Campo libre..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Coadyuvantes, insecticidas u otros</span>
+        <span class="field-hint">¿Se han usado adicionalmente?</span>
+        <textarea class="text-input" id="coadyuvantes" rows="2" placeholder="Campo libre..."></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Enfermedad(es) detectada(s)</div>
+      <div id="enfermedadesContainer"></div>
+      <span class="add-link" onclick="agregarEnfermedad()">+ Agregar otra enfermedad</span>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Aplicación(es) de producto</div>
+      <div id="aplicacionesContainer"></div>
+      <span class="add-link" onclick="agregarAplicacion()">+ Agregar otra aplicación</span>
+    </div>
+
+    <div class="card">
       <div class="form-header">
         <strong id="cultivoTitulo" style="font-size:1.05rem;"></strong>
         <span class="tag" id="cultivoCount"></span>
@@ -250,16 +361,28 @@ input[type=range]{flex:1;accent-color:var(--green-deep);}
 
     <div class="card">
       <span class="field-label">Observaciones generales</span>
-      <textarea id="observacionesGenerales" rows="3" class="text-input" placeholder="Cualquier cosa que no encaje en las variables de arriba..." style="resize:vertical;"></textarea>
+      <span class="field-hint">Escribe o graba una nota de voz — se transcribe automáticamente aquí</span>
+      <div class="mic-row">
+        <textarea id="observacionesGenerales" rows="3" class="text-input" placeholder="Cualquier cosa que no encaje en las variables de arriba..."></textarea>
+        <button type="button" class="mic-btn" id="micBtn" title="Grabar nota de voz">🎤</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Fotos de evidencia</div>
+      <div class="foto-dropzone" id="fotoDropzone">Toca para simular la subida de fotos (máx. 10)</div>
+      <div class="foto-grid" id="fotoGrid"></div>
+      <div class="foto-count" id="fotoCount">0 / 10 fotos</div>
     </div>
 
     <button class="save-btn" id="saveBtn">Guardar reporte</button>
-    <p class="foot-note">Al guardar, esto quedaría en registro_seguimiento_agro y valor_variable_cultivo — aquí solo se simula, sin conexión real a base de datos.</p>
+    <div class="validacion-note">Este reporte se guardará de inmediato, pero quedará marcado como <strong>pendiente</strong> — se le notificará a Angel por Zoho Cliq para su validación. Solo lo aprobado aparece en consultas, dashboard y homologación.</div>
+    <p class="foot-note">Al guardar, esto quedaría en registro_seguimiento_agro, enfermedad_detectada, aplicacion_producto, valor_variable_cultivo y archivo — aquí solo se simula, sin conexión real a base de datos.</p>
   </div>
 
 </div>
 
-<div class="toast" id="toast">Reporte guardado (simulado) — así quedaría en las tablas de Agro</div>
+<div class="toast" id="toast">Reporte guardado (simulado) — pendiente de validación de Angel</div>
 
 <script>
 const DATA = {
@@ -278,22 +401,22 @@ const DATA = {
       { nombre: "Rendimiento", tipo: "numerico", unidad: "kg/ha" }
     ]
   },
-  maiz: {
-    nombre: "Maíz",
+  papaya: {
+    nombre: "Papaya",
     variables: [
-      { nombre: "Días después de siembra", tipo: "numerico", unidad: "DDS" },
       { nombre: "Altura de planta", tipo: "numerico", unidad: "cm" },
+      { nombre: "Diámetro de tallo", tipo: "numerico", unidad: "cm" },
       { nombre: "Número de hojas", tipo: "numerico", unidad: "conteo" },
-      { nombre: "Diámetro de tallo", tipo: "numerico", unidad: "mm" },
-      { nombre: "Coloración foliar", tipo: "escala", unidad: "0–5" },
-      { nombre: "Incidencia de enfermedades foliares", tipo: "porcentaje" },
-      { nombre: "Severidad de enfermedades", tipo: "escala", unidad: "0–5" },
-      { nombre: "Daño por gusano cogollero", tipo: "porcentaje" },
-      { nombre: "Número de mazorcas", tipo: "numerico", unidad: "conteo/planta" },
-      { nombre: "Tamaño de mazorca", tipo: "numerico", unidad: "cm" },
-      { nombre: "Peso de mazorca", tipo: "numerico", unidad: "g" },
-      { nombre: "Grano por mazorca", tipo: "numerico", unidad: "estimado" },
-      { nombre: "Rendimiento final", tipo: "numerico", unidad: "t/ha" }
+      { nombre: "Floración", tipo: "porcentaje" },
+      { nombre: "Número de frutos", tipo: "numerico", unidad: "conteo/planta" },
+      { nombre: "Incidencia de antracnosis", tipo: "porcentaje" },
+      { nombre: "Severidad de antracnosis", tipo: "escala", unidad: "0–5" },
+      { nombre: "Virosis", tipo: "porcentaje" },
+      { nombre: "Pudriciones", tipo: "porcentaje" },
+      { nombre: "Peso de fruto", tipo: "numerico", unidad: "kg" },
+      { nombre: "Coloración de fruto", tipo: "escala", unidad: "0–5" },
+      { nombre: "Fruto comercial", tipo: "porcentaje" },
+      { nombre: "Rendimiento", tipo: "numerico", unidad: "t/ha" }
     ]
   },
   fresa: {
@@ -336,6 +459,39 @@ const DATA = {
       { nombre: "Caída de fruto", tipo: "porcentaje" },
       { nombre: "Rendimiento", tipo: "numerico", unidad: "t/ha" }
     ]
+  },
+  aguacate: {
+    nombre: "Aguacate ⚠",
+    variables: [
+      { nombre: "Vigor del árbol", tipo: "escala", unidad: "0–5" },
+      { nombre: "Floración", tipo: "porcentaje" },
+      { nombre: "Incidencia de antracnosis", tipo: "porcentaje" },
+      { nombre: "Incidencia de tristeza del aguacatero", tipo: "porcentaje" },
+      { nombre: "Peso de fruto", tipo: "numerico", unidad: "g" },
+      { nombre: "Rendimiento", tipo: "numerico", unidad: "t/ha" }
+    ]
+  },
+  tomate: {
+    nombre: "Jitomate (Solanáceas)",
+    variables: [
+      { nombre: "Altura de planta", tipo: "numerico", unidad: "cm" },
+      { nombre: "Número de hojas", tipo: "numerico", unidad: "conteo" },
+      { nombre: "Diámetro de tallo", tipo: "numerico", unidad: "mm" },
+      { nombre: "Incidencia de cenicilla", tipo: "porcentaje" },
+      { nombre: "Severidad de cenicilla", tipo: "porcentaje" },
+      { nombre: "Incidencia de tizón tardío", tipo: "porcentaje" },
+      { nombre: "Severidad de tizón", tipo: "escala", unidad: "0–5" },
+      { nombre: "Incidencia de moho gris", tipo: "porcentaje" },
+      { nombre: "Incidencia de bacteriosis", tipo: "porcentaje" },
+      { nombre: "Presencia de TMV u otros virus", tipo: "booleano" },
+      { nombre: "Confirmación de laboratorio (ELISA)", tipo: "categorico", opciones: ["Positivo", "Negativo", "No aplica"] },
+      { nombre: "Número de racimos", tipo: "numerico", unidad: "conteo/planta" },
+      { nombre: "Número de frutos", tipo: "numerico", unidad: "conteo/planta" },
+      { nombre: "Peso promedio de fruto", tipo: "numerico", unidad: "g" },
+      { nombre: "Diámetro de fruto", tipo: "numerico", unidad: "mm" },
+      { nombre: "Fruto comercial", tipo: "porcentaje" },
+      { nombre: "Rendimiento", tipo: "numerico", unidad: "t/ha" }
+    ]
   }
 };
 
@@ -351,7 +507,7 @@ let CULTIVOS_EXISTENTES = [
   },
   {
     id: 2,
-    titulo: "Experimento de campo 3 — Chiapas",
+    titulo: "Prueba de campo 3 — Chiapas",
     tipo: "citricos",
     historial: [
       { fecha: "01 jul 2026", resumen: "Primera observación — sospecha de HLB, pendiente confirmación PCR" }
@@ -434,6 +590,190 @@ document.getElementById('crearBtn').addEventListener('click', () => {
   goTo('observacion');
 });
 
+// --- Enfermedades detectadas (N por visita) ---
+const SUBTIPOS_ENFERMEDAD = {
+  Hongo: ['Ascomiceto', 'Basidiomiceto', 'Oomiceto', 'Otro / no identificado'],
+  Bacteria: ['Bacteria Gram negativa', 'Bacteria Gram positiva / Actinobacteria', 'Otro / no identificado'],
+  Virus: ['Potyvirus', 'Geminivirus', 'Tobamovirus', 'Otro / no identificado']
+};
+let enfermedadCount = 0;
+function agregarEnfermedad() {
+  enfermedadCount++;
+  const id = 'enf_' + enfermedadCount;
+  const block = document.createElement('div');
+  block.className = 'repeat-block';
+  block.id = id;
+  block.innerHTML = `
+    <span class="repeat-block-title">Enfermedad</span>
+    <button type="button" class="remove-block-btn" onclick="document.getElementById('${id}').remove()">&times;</button>
+    <div class="field-block">
+      <span class="field-label">Nombre de la enfermedad</span>
+      <input type="text" class="text-input enf-nombre" placeholder="Ej. Roya del café">
+    </div>
+    <div class="field-block">
+      <span class="field-label">Descripción de la enfermedad</span>
+      <textarea class="text-input enf-descripcion" rows="2" placeholder="Lo que se observa, en tus propias palabras..."></textarea>
+    </div>
+    <div class="row-2 field-block">
+      <div>
+        <span class="field-label">Tipo de enfermedad</span>
+        <div class="select-wrap"><select class="enf-tipo">
+          <option>Hongo</option><option>Bacteria</option><option>Virus</option>
+        </select></div>
+      </div>
+      <div>
+        <span class="field-label">Subtipo</span>
+        <div class="select-wrap"><select class="enf-subtipo"></select></div>
+      </div>
+    </div>
+    <div class="row-2 field-block">
+      <div>
+        <span class="field-label">Estadio</span>
+        <span class="field-hint">Ej. "Estadio 4"</span>
+        <input type="text" class="text-input enf-estadio" placeholder="Ej. Estadio 2">
+      </div>
+      <div>
+        <span class="field-label">Variedad del microorganismo</span>
+        <input type="text" class="text-input enf-variedad-microorganismo" placeholder="Opcional">
+      </div>
+    </div>
+  `;
+  const tipoSelect = block.querySelector('.enf-tipo');
+  const subtipoSelect = block.querySelector('.enf-subtipo');
+  const actualizarSubtipos = () => {
+    const opciones = SUBTIPOS_ENFERMEDAD[tipoSelect.value] || [];
+    subtipoSelect.innerHTML = '<option value="">Sin especificar</option>' + opciones.map(o => `<option>${o}</option>`).join('');
+    subtipoSelect.disabled = opciones.length === 0;
+  };
+  tipoSelect.addEventListener('change', actualizarSubtipos);
+  actualizarSubtipos();
+  document.getElementById('enfermedadesContainer').appendChild(block);
+}
+
+// --- Aplicaciones de producto (N por visita) ---
+let aplicacionCount = 0;
+function agregarAplicacion() {
+  aplicacionCount++;
+  const id = 'apl_' + aplicacionCount;
+  const block = document.createElement('div');
+  block.className = 'repeat-block';
+  block.id = id;
+  block.innerHTML = `
+    <span class="repeat-block-title">Aplicación</span>
+    <button type="button" class="remove-block-btn" onclick="document.getElementById('${id}').remove()">&times;</button>
+    <div class="field-block">
+      <span class="field-label">Producto utilizado</span>
+      <input type="text" class="text-input apl-producto" placeholder="Ej. Agrocker">
+    </div>
+    <div class="row-2 field-block">
+      <div>
+        <span class="field-label">Lote</span>
+        <input type="text" class="text-input apl-lote" placeholder="Ej. L-2026-0143">
+      </div>
+      <div>
+        <span class="field-label">Concentración</span>
+        <div class="num-input"><input type="number" class="text-input apl-concentracion" placeholder="0"><span class="unit">%</span></div>
+      </div>
+    </div>
+    <div class="field-block">
+      <span class="field-label">Tipo / método de aplicación</span>
+      <div class="select-wrap"><select class="apl-tipo">
+        <option>Drench</option><option>Goteo</option><option>Foliar</option><option>Inyección al tronco (endoterapia)</option>
+      </select></div>
+    </div>
+    <div class="row-2 field-block">
+      <div>
+        <span class="field-label">Número de aplicación</span>
+        <input type="number" class="text-input apl-numero" placeholder="Ej. 3">
+      </div>
+      <div>
+        <span class="field-label">Dosis</span>
+        <input type="text" class="text-input apl-dosis" placeholder="Ej. 1L por planta">
+      </div>
+    </div>
+    <div class="field-block">
+      <span class="field-label">Objetivo de la aplicación</span>
+      <div class="chip-row apl-objetivo-chips">
+        <button type="button" class="chip-btn" data-value="Pruebas">Pruebas</button>
+        <button type="button" class="chip-btn" data-value="Prevención">Prevención</button>
+        <button type="button" class="chip-btn" data-value="Control">Control</button>
+        <button type="button" class="chip-btn" data-value="Postcosecha">Postcosecha</button>
+      </div>
+    </div>
+  `;
+  block.querySelectorAll('.apl-objetivo-chips .chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      block.querySelectorAll('.apl-objetivo-chips .chip-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  document.getElementById('aplicacionesContainer').appendChild(block);
+}
+
+// --- Fotos (máx 10, simulado) ---
+let fotoCount = 0;
+document.getElementById('fotoDropzone').addEventListener('click', () => {
+  if (fotoCount >= 10) return;
+  fotoCount++;
+  const thisIndex = fotoCount;
+  const item = document.createElement('div');
+  item.className = 'foto-item';
+  item.innerHTML = `
+    <div class="foto-thumb">IMG ${thisIndex}<button class="rm" type="button">&times;</button></div>
+    <div class="foto-item-body">
+      <div class="foto-momento-row">
+        <button type="button" class="chip-btn" data-value="Antes">Antes</button>
+        <button type="button" class="chip-btn" data-value="Durante">Durante</button>
+        <button type="button" class="chip-btn" data-value="Después">Después</button>
+      </div>
+      <input type="text" class="text-input foto-comentario" placeholder="Comentario (opcional)">
+    </div>
+  `;
+  item.querySelector('.rm').addEventListener('click', (e) => {
+    e.stopPropagation();
+    item.remove();
+    fotoCount--;
+    actualizarFotoCount();
+  });
+  item.querySelectorAll('.foto-momento-row .chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      item.querySelectorAll('.foto-momento-row .chip-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  document.getElementById('fotoGrid').appendChild(item);
+  actualizarFotoCount();
+});
+function actualizarFotoCount() {
+  const el = document.getElementById('fotoCount');
+  el.textContent = fotoCount + ' / 10 fotos';
+  el.classList.toggle('limit', fotoCount >= 10);
+}
+
+// --- Nota de voz (simulada) ---
+const FRASES_DEMO_VOZ = [
+  "Se nota buen desarrollo general, aunque hay un poco de estrés hídrico en la parte baja del lote.",
+  "El productor comenta que llovió fuerte hace tres días, podría explicar la humedad alta.",
+  "Se ve mejoría respecto a la visita anterior, sobre todo en las plantas más jóvenes."
+];
+let isRecording = false;
+document.getElementById('micBtn').addEventListener('click', () => {
+  const btn = document.getElementById('micBtn');
+  const textarea = document.getElementById('observacionesGenerales');
+  if (!isRecording) {
+    isRecording = true;
+    btn.classList.add('recording');
+    btn.textContent = '⏹';
+  } else {
+    isRecording = false;
+    btn.classList.remove('recording');
+    btn.textContent = '🎤';
+    const frase = FRASES_DEMO_VOZ[Math.floor(Math.random() * FRASES_DEMO_VOZ.length)];
+    textarea.value = (textarea.value ? textarea.value + ' ' : '') + '[Transcrito de audio] ' + frase;
+  }
+});
+
+
 function renderField(v) {
   const row = document.createElement('div');
   row.className = 'variable-row';
@@ -503,6 +843,12 @@ function renderField(v) {
       wrap.appendChild(btn);
     });
     row.appendChild(wrap);
+  } else if (v.tipo === 'texto') {
+    const textarea = document.createElement('textarea');
+    textarea.className = 'text-input';
+    textarea.rows = 2;
+    textarea.placeholder = 'Campo libre...';
+    row.appendChild(textarea);
   }
 
   return row;
@@ -516,15 +862,34 @@ function renderObservacionForm(tipoKey, tituloOverride) {
   const container = document.getElementById('variablesContainer');
   container.innerHTML = '';
   c.variables.forEach(v => container.appendChild(renderField(v)));
+
   document.getElementById('reportadoPor').value = '';
+  document.getElementById('temperatura').value = '';
+  document.getElementById('humedadRelativa').value = '';
+  document.getElementById('precipitacionLluvia').value = '';
+  document.getElementById('estadoActualCultivo').value = '';
+  document.getElementById('paqueteTecnologico').value = '';
+  document.getElementById('coadyuvantes').value = '';
   document.getElementById('observacionesGenerales').value = '';
+
+  document.getElementById('enfermedadesContainer').innerHTML = '';
+  enfermedadCount = 0;
+  agregarEnfermedad();
+
+  document.getElementById('aplicacionesContainer').innerHTML = '';
+  aplicacionCount = 0;
+  agregarAplicacion();
+
+  document.getElementById('fotoGrid').innerHTML = '';
+  fotoCount = 0;
+  actualizarFotoCount();
 }
 
 document.getElementById('saveBtn').addEventListener('click', () => {
   const c = CULTIVOS_EXISTENTES.find(x => x.id === currentCultivoId);
   if (c) {
     const hoy = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
-    c.historial.push({ fecha: hoy, resumen: 'Nueva observación registrada' });
+    c.historial.push({ fecha: hoy, resumen: 'Nueva observación registrada (pendiente de validación)' });
   }
   const toast = document.getElementById('toast');
   toast.classList.add('show');

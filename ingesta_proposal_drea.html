@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Motor de Inteligencia NFG — Boceto de seguimiento DREA</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --ivory:#FAF9F5;
+  --paper:#FFFFFF;
+  --ink:#14171A;
+  --ink-soft:#4A5056;
+  --ink-faint:#8A9198;
+  --line:#E6E3DA;
+  --green-deep:#0B4F3C;
+  --green-mid:#146B4F;
+  --green-light:#D7F0E1;
+  --amber-human:#B9800F;
+  --amber-human-bg:#FBF1DA;
+  --radius:16px;
+  --radius-sm:10px;
+  --shadow-sm:0 10px 26px -16px rgba(15,20,20,0.22);
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+html,body{height:100%;}
+body{
+  background:var(--ivory);
+  color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:720px;margin:0 auto;padding:40px 24px 80px;}
+
+.badge{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:var(--amber-human-bg);color:var(--amber-human);
+  border-radius:999px;padding:.4rem .9rem;font-size:.78rem;font-weight:700;
+  margin-bottom:1.4rem;
+}
+.badge svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;}
+
+.kicker{
+  text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;font-weight:700;
+  color:var(--green-deep);margin-bottom:.6rem;
+}
+h1{font-size:clamp(1.6rem,3.2vw,2.1rem);font-weight:750;letter-spacing:-0.01em;margin-bottom:.5rem;}
+.sub{color:var(--ink-soft);font-size:.98rem;line-height:1.55;max-width:56ch;margin-bottom:2.2rem;}
+
+.card{
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+  padding:1.6rem 1.7rem;box-shadow:var(--shadow-sm);margin-bottom:1.4rem;
+}
+.section-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--green-deep);margin-bottom:1rem;}
+.field-label{font-size:.82rem;font-weight:700;color:var(--ink);margin-bottom:.5rem;display:block;}
+.field-hint{font-size:.76rem;color:var(--ink-faint);font-weight:400;margin-top:-.35rem;margin-bottom:.6rem;display:block;}
+.text-input{
+  width:100%;padding:.85rem 1rem;border:1.5px solid var(--line);border-radius:var(--radius-sm);
+  font-size:.95rem;color:var(--ink);font-family:inherit;
+}
+textarea.text-input{resize:vertical;}
+.select-wrap{position:relative;}
+select{
+  width:100%;padding:.85rem 1rem;border:1.5px solid var(--line);border-radius:var(--radius-sm);
+  font-size:1rem;font-weight:650;color:var(--green-deep);background:var(--paper);
+  appearance:none;cursor:pointer;
+}
+select:focus{outline:2px solid var(--green-mid);outline-offset:1px;}
+.select-wrap::after{
+  content:"";position:absolute;right:1rem;top:50%;transform:translateY(-65%);
+  width:8px;height:8px;border-right:2px solid var(--ink-soft);border-bottom:2px solid var(--ink-soft);
+  transform-origin:center;rotate:45deg;pointer-events:none;
+}
+
+.field-block{margin-bottom:1.3rem;}
+.field-block:last-child{margin-bottom:0;}
+
+.toggle-row{display:flex;gap:.6rem;}
+.toggle-btn{
+  padding:.5rem 1.1rem;border:1.5px solid var(--line);border-radius:999px;
+  background:var(--paper);font-size:.85rem;font-weight:650;color:var(--ink-soft);cursor:pointer;
+  transition:all .15s var(--ease);
+}
+.toggle-btn.active{background:var(--green-deep);border-color:var(--green-deep);color:#fff;}
+
+.chip-row{display:flex;gap:.5rem;flex-wrap:wrap;}
+.chip-btn{
+  padding:.5rem 1rem;border:1.5px solid var(--line);border-radius:999px;
+  background:var(--paper);font-size:.83rem;font-weight:650;color:var(--ink-soft);cursor:pointer;
+  transition:all .15s var(--ease);
+}
+.chip-btn.active{background:var(--green-deep);border-color:var(--green-deep);color:#fff;}
+.chip-btn.mejoro.active{background:#3B6D11;border-color:#3B6D11;}
+.chip-btn.empeoro.active{background:#993C1D;border-color:#993C1D;}
+.chip-btn.sincambio.active{background:var(--ink-faint);border-color:var(--ink-faint);}
+
+.sintoma-row{
+  display:flex;gap:.6rem;align-items:flex-start;margin-bottom:.7rem;padding-bottom:.7rem;
+  border-bottom:1px solid var(--line);
+}
+.sintoma-row:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
+.sintoma-row .text-input{flex:1;}
+.sintoma-freq{display:flex;gap:.4rem;flex-shrink:0;}
+.remove-btn{
+  background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:1.1rem;
+  padding:.4rem;flex-shrink:0;
+}
+.remove-btn:hover{color:#993C1D;}
+.add-link{
+  font-size:.83rem;color:var(--green-deep);font-weight:650;cursor:pointer;
+  display:inline-flex;align-items:center;gap:.3rem;margin-top:.4rem;
+}
+.add-link:hover{text-decoration:underline;}
+
+.save-btn{
+  width:100%;padding:1rem;border:none;border-radius:var(--radius-sm);
+  background:var(--green-deep);color:#fff;font-size:1rem;font-weight:700;cursor:pointer;
+  transition:background .15s var(--ease);
+}
+.save-btn:hover{background:var(--green-mid);}
+
+.toast{
+  position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--ink);color:#fff;padding:.9rem 1.4rem;border-radius:var(--radius-sm);
+  font-size:.9rem;font-weight:650;opacity:0;pointer-events:none;
+  transition:opacity .3s var(--ease),transform .3s var(--ease);
+  box-shadow:0 20px 50px -20px rgba(0,0,0,.4);
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+.foot-note{font-size:.78rem;color:var(--ink-faint);text-align:center;margin-top:1.6rem;line-height:1.6;}
+
+.choice-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+.choice-card{
+  background:var(--paper);border:1.5px solid var(--line);border-radius:var(--radius);
+  padding:1.6rem 1.4rem;cursor:pointer;text-align:left;transition:all .15s var(--ease);
+}
+.choice-card:hover{border-color:var(--green-deep);box-shadow:var(--shadow-sm);}
+.choice-card h3{font-size:1rem;font-weight:750;margin-bottom:.4rem;color:var(--ink);}
+.choice-card p{font-size:.83rem;color:var(--ink-soft);line-height:1.4;}
+
+.paciente-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:1rem 0;border-bottom:1px solid var(--line);cursor:pointer;
+}
+.paciente-item:last-child{border-bottom:none;}
+.paciente-item:hover .paciente-item-title{color:var(--green-mid);}
+.paciente-item-title{font-size:.95rem;font-weight:650;color:var(--ink);transition:color .15s var(--ease);}
+.paciente-item-sub{font-size:.78rem;color:var(--ink-faint);margin-top:.2rem;}
+.paciente-item-arrow{color:var(--ink-faint);font-size:1.1rem;}
+
+.back-link{
+  font-size:.83rem;color:var(--green-deep);font-weight:650;cursor:pointer;
+  display:inline-flex;align-items:center;gap:.3rem;margin-bottom:1rem;
+}
+.back-link:hover{text-decoration:underline;}
+
+.historial-item{display:flex;gap:.9rem;padding:.8rem 0;border-bottom:1px solid var(--line);}
+.historial-item:last-child{border-bottom:none;}
+.historial-dot{width:8px;height:8px;border-radius:50%;background:var(--green-deep);margin-top:.4rem;flex-shrink:0;}
+.historial-fecha{font-size:.78rem;color:var(--ink-faint);font-weight:650;}
+.historial-resumen{font-size:.88rem;color:var(--ink);margin-top:.15rem;}
+.historial-evolucion{
+  display:inline-block;font-size:.72rem;font-weight:700;padding:.15rem .55rem;
+  border-radius:999px;margin-top:.35rem;
+}
+.historial-evolucion.mejoro{background:var(--green-light);color:#3B6D11;}
+.historial-evolucion.empeoro{background:#FBEAE7;color:#993C1D;}
+.historial-evolucion.sincambio{background:var(--line);color:var(--ink-soft);}
+
+.view{display:none;}
+.view.active{display:block;}
+
+.row-2{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+
+.example-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem;}
+.example-btn{
+  padding:.4rem .85rem;border:1.5px solid var(--line);border-radius:999px;
+  background:var(--paper);font-size:.8rem;font-weight:600;color:var(--ink-soft);cursor:pointer;
+}
+.example-btn:hover{border-color:var(--green-deep);color:var(--green-deep);}
+
+.repeat-block{
+  border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:1.2rem 1.3rem;
+  margin-bottom:1rem;position:relative;
+}
+.repeat-block .remove-block-btn{
+  position:absolute;top:.7rem;right:.8rem;background:none;border:none;color:var(--ink-faint);
+  cursor:pointer;font-size:1.2rem;line-height:1;
+}
+.repeat-block .remove-block-btn:hover{color:#993C1D;}
+.repeat-block-title{font-size:.78rem;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.9rem;}
+
+.mic-row{display:flex;gap:.6rem;align-items:flex-start;}
+.mic-row textarea{flex:1;}
+.mic-btn{
+  width:42px;height:42px;border-radius:10px;border:1.5px solid var(--line);background:var(--paper);
+  cursor:pointer;font-size:1.05rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.mic-btn.recording{background:#993C1D;border-color:#993C1D;color:#fff;animation:pulse 1s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(153,60,29,.4);}70%{box-shadow:0 0 0 8px rgba(153,60,29,0);}100%{box-shadow:0 0 0 0 rgba(153,60,29,0);}}
+
+.file-dropzone{
+  border:2px dashed var(--line);border-radius:var(--radius-sm);padding:1.4rem;text-align:center;
+  cursor:pointer;font-size:.85rem;color:var(--ink-faint);
+}
+.file-dropzone:hover{border-color:var(--green-deep);}
+.file-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:.5rem;margin-top:.9rem;}
+.file-thumb{
+  aspect-ratio:1;border-radius:8px;background:var(--green-light);display:flex;align-items:center;
+  justify-content:center;font-size:.68rem;color:var(--green-deep);font-weight:700;position:relative;overflow:hidden;
+  text-align:center;padding:.2rem;
+}
+.file-thumb .rm{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.5);color:#fff;border:none;
+  border-radius:50%;width:16px;height:16px;font-size:.65rem;cursor:pointer;line-height:1;}
+.file-count{font-size:.78rem;color:var(--ink-faint);margin-top:.6rem;}
+.file-count.limit{color:#993C1D;font-weight:650;}
+
+.pendiente-badge{
+  display:inline-block;font-size:.72rem;font-weight:700;color:var(--amber-human);
+  background:var(--amber-human-bg);padding:.2rem .6rem;border-radius:999px;margin-top:.5rem;
+}
+
+.num-input{display:flex;align-items:center;gap:.6rem;}
+.num-input input[type=number]{flex:1;}
+.num-input .unit{font-size:.85rem;color:var(--ink-soft);font-weight:600;}
+
+.contrato-box{
+  display:none;
+  background:#FFFDF8;border:1.5px solid var(--line);border-radius:var(--radius-sm);
+  padding:1.6rem 1.7rem;margin-top:1rem;
+  font-family:Georgia,"Times New Roman",serif;
+}
+.contrato-box.show{display:block;}
+.contrato-box h4{
+  font-size:.95rem;text-align:center;text-transform:uppercase;letter-spacing:.04em;
+  margin-bottom:1.1rem;color:var(--ink);
+}
+.contrato-box p{font-size:.87rem;color:var(--ink);line-height:1.7;margin-bottom:.9rem;}
+.contrato-box p:last-child{margin-bottom:0;}
+.firma-row{
+  display:flex;justify-content:space-between;align-items:flex-end;
+  margin-top:1.4rem;padding-top:1rem;border-top:1px dashed var(--line);
+  font-family:inherit;
+}
+.firma-linea{font-size:.8rem;color:var(--ink-faint);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="badge">
+    <svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9L2.7 17a2 2 0 001.7 3h15.2a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+    Boceto ilustrativo — no es el front final (Mes 2)
+  </div>
+
+  <div class="kicker">DREA · Seguimiento de paciente</div>
+  <h1>Registrar seguimiento</h1>
+  <p class="sub">Representa lo que el bot iría preguntando y guardando conforme un paciente cuenta cómo se siente. Cada seguimiento se guarda con fecha, ligado al paciente — así se arma su historial completo en el tiempo.</p>
+
+  <div class="view active" id="view-start">
+    <div class="field-block">
+      <span class="field-label">Tipo de paciente</span>
+      <div class="chip-row">
+        <button type="button" class="chip-btn active" disabled style="cursor:default;">Humano</button>
+        <button type="button" class="chip-btn" id="mascotaBtn" style="opacity:.55;">Mascota <span style="font-size:.7em;">(próximamente)</span></button>
+      </div>
+    </div>
+    <div class="choice-row">
+      <div class="choice-card" onclick="goTo('existing-list')">
+        <h3>Paciente existente</h3>
+        <p>Agregar un nuevo seguimiento a un paciente que ya tiene historial.</p>
+      </div>
+      <div class="choice-card" onclick="goTo('new-form')">
+        <h3>Paciente nuevo</h3>
+        <p>Registrar a un paciente que todavía no existe en el sistema.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="view" id="view-existing-list">
+    <span class="back-link" onclick="goTo('start')">&larr; Volver</span>
+    <div class="card">
+      <span class="field-label">Selecciona el paciente</span>
+      <div id="pacienteListContainer"></div>
+    </div>
+  </div>
+
+  <div class="view" id="view-existing-historial">
+    <span class="back-link" onclick="goTo('existing-list')">&larr; Volver a la lista</span>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.2rem;">
+        <strong id="historialTitulo" style="font-size:1.05rem;"></strong>
+        <span class="paciente-item-sub" id="historialSub"></span>
+      </div>
+      <div id="historialContainer"></div>
+    </div>
+    <button class="save-btn" id="agregarSeguimientoBtn">Agregar nuevo seguimiento</button>
+    <span class="add-link" onclick="abrirEncuesta()" style="display:block;text-align:center;margin-top:1rem;">Responder encuesta de salida &rarr;</span>
+  </div>
+
+  <div class="view" id="view-encuesta">
+    <span class="back-link" onclick="goTo('existing-historial')">&larr; Volver</span>
+    <div class="card">
+      <div class="section-title">Encuesta de salida</div>
+      <div class="field-block">
+        <span class="field-label">¿Recomendarías D'rea?</span>
+        <div class="toggle-row" id="recomendariaToggle">
+          <button type="button" class="toggle-btn" data-value="true">Sí</button>
+          <button type="button" class="toggle-btn" data-value="false">No</button>
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">¿Qué te parece el precio?</span>
+        <div class="chip-row" id="precioChips">
+          <button type="button" class="chip-btn" data-value="Superior">Superior</button>
+          <button type="button" class="chip-btn" data-value="Barato">Barato</button>
+          <button type="button" class="chip-btn" data-value="Justo">Justo</button>
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">¿Deseas seguir usando nuestro producto?</span>
+        <span class="field-hint">Redacción exacta pendiente de definir con el equipo</span>
+        <div class="toggle-row" id="continuarToggle">
+          <button type="button" class="toggle-btn" data-value="true">Sí</button>
+          <button type="button" class="toggle-btn" data-value="false">No</button>
+        </div>
+      </div>
+      <div class="field-block" id="motivoNoContinuarBlock" style="display:none;">
+        <span class="field-label">Cuéntanos por qué</span>
+        <textarea class="text-input" id="motivoNoContinuar" rows="2" placeholder="Campo libre..."></textarea>
+      </div>
+    </div>
+    <button class="save-btn" id="saveEncuestaBtn">Guardar encuesta</button>
+    <p class="foot-note">Esto quedaría en encuesta_salida — aquí solo se simula.</p>
+  </div>
+
+  <div class="view" id="view-new-form">
+    <span class="back-link" onclick="goTo('start')">&larr; Volver</span>
+
+    <div class="card">
+      <div class="section-title">Datos del paciente</div>
+      <div class="field-block">
+        <span class="field-label">Nombre completo</span>
+        <input type="text" class="text-input" id="nuevoNombreCompleto" placeholder="Ej. María Fernández López">
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Edad</span>
+          <input type="number" class="text-input" id="nuevaEdad" placeholder="0">
+        </div>
+        <div>
+          <span class="field-label">Sexo</span>
+          <div class="chip-row" id="nuevoSexoChips">
+            <button type="button" class="chip-btn" data-value="Femenino">Femenino</button>
+            <button type="button" class="chip-btn" data-value="Masculino">Masculino</button>
+            <button type="button" class="chip-btn" data-value="Otro">Otro</button>
+          </div>
+        </div>
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Región</span>
+          <input type="text" class="text-input" id="nuevaRegion" placeholder="Ej. CDMX, Jalisco...">
+        </div>
+        <div>
+          <span class="field-label">Celular</span>
+          <span class="field-hint">Sirve como identificador único del paciente</span>
+          <input type="text" class="text-input" id="nuevoCelular" placeholder="Ej. 55 1234 5678">
+        </div>
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Estatura</span>
+          <div class="num-input"><input type="number" class="text-input" id="nuevaEstatura" placeholder="0"><span class="unit">cm</span></div>
+        </div>
+        <div>
+          <span class="field-label">Peso habitual (antes de la enfermedad)</span>
+          <div class="num-input"><input type="number" class="text-input" id="nuevoPesoHabitual" placeholder="0"><span class="unit">kg</span></div>
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Pérdida de peso desde la enfermedad</span>
+        <span class="field-hint">Si no recuerdas el peso exacto, descríbelo aquí</span>
+        <div class="example-row">
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevaPerdidaPeso','No he perdido peso')">No he perdido peso</button>
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevaPerdidaPeso','Menos de 5kg')">Menos de 5kg</button>
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevaPerdidaPeso','Más de 5kg')">Más de 5kg</button>
+        </div>
+        <input type="text" class="text-input" id="nuevaPerdidaPeso" placeholder="¿Cuánto, aproximadamente?">
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Fecha de diagnóstico</span>
+          <input type="date" class="text-input" id="nuevaFechaDiagnostico">
+        </div>
+        <div>
+          <span class="field-label">Fecha en que empezó a sentirse mal</span>
+          <input type="date" class="text-input" id="nuevaFechaInicioSintomas">
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Antecedentes de salud relevantes</span>
+        <span class="field-hint">Antecedentes que puedan influir en el resultado</span>
+        <div class="example-row">
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevoAntecedente','Diabetes')">Diabetes</button>
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevoAntecedente','Hipertensión')">Hipertensión</button>
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevoAntecedente','Obesidad')">Obesidad</button>
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevoAntecedente','Otra')">Otra</button>
+        </div>
+        <textarea class="text-input" id="nuevoAntecedente" rows="2" placeholder="Escribe en texto libre..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Enfermedades concomitantes</span>
+        <span class="field-hint">Las que tiene AL MISMO TIEMPO, no antecedentes previos</span>
+        <div class="example-row">
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevaConcomitante','Diabetes')">Diabetes</button>
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevaConcomitante','Hipertensión')">Hipertensión</button>
+          <button type="button" class="example-btn" onclick="agregarEjemplo('nuevaConcomitante','Otra')">Otra</button>
+        </div>
+        <textarea class="text-input" id="nuevaConcomitante" rows="2" placeholder="Escribe en texto libre..."></textarea>
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Cirugías relevantes</span>
+          <textarea class="text-input" id="nuevaCirugia" rows="2" placeholder="Texto libre, opcional..."></textarea>
+        </div>
+        <div>
+          <span class="field-label">Alergias</span>
+          <textarea class="text-input" id="nuevaAlergia" rows="2" placeholder="Texto libre, opcional..."></textarea>
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Tabaquismo o alcoholismo</span>
+        <textarea class="text-input" id="nuevoHabitos" rows="2" placeholder="Texto libre, opcional..."></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Consentimiento</div>
+      <div class="field-block" style="display:flex;align-items:flex-start;gap:.6rem;">
+        <input type="checkbox" id="nuevoConsentimiento" style="margin-top:.3rem;width:16px;height:16px;accent-color:var(--green-deep);">
+        <label for="nuevoConsentimiento" style="font-size:.87rem;color:var(--ink-soft);line-height:1.5;">
+          El paciente acepta expresamente el uso de su información para fines de analítica segmentada y mejora de producto (LFPDPPP).
+        </label>
+      </div>
+      <div class="field-block" style="display:flex;align-items:flex-start;gap:.6rem;">
+        <input type="checkbox" id="nuevaResponsabilidad" style="margin-top:.3rem;width:16px;height:16px;accent-color:var(--green-deep);">
+        <label for="nuevaResponsabilidad" style="font-size:.87rem;color:var(--ink-soft);line-height:1.5;">
+          El paciente se hace responsable del consumo de los productos de D'rea bajo sus propias consecuencias, entendiendo que no sustituyen tratamiento médico profesional.
+        </label>
+      </div>
+      <span class="add-link" onclick="mostrarContrato()">Ver vista previa del contrato &rarr;</span>
+
+      <div class="contrato-box" id="contratoPreview">
+        <h4>Contrato de Consentimiento y Responsabilidad de Consumo — D'rea</h4>
+        <p id="contratoCuerpo"></p>
+        <div class="firma-row">
+          <div style="flex:1;">
+            <span class="field-label" style="font-family:-apple-system,sans-serif;">Firma (escribe tu nombre completo)</span>
+            <input type="text" class="text-input" id="firmaContrato" placeholder="Firma del paciente" style="font-family:-apple-system,sans-serif;max-width:280px;">
+          </div>
+          <span class="firma-linea" id="fechaContrato"></span>
+        </div>
+      </div>
+    </div>
+
+    <button class="save-btn" id="crearPacienteBtn">Crear y continuar</button>
+    <p class="foot-note">El contrato firmado se guardaría como documento en el repositorio de archivos (ARCHIVO), a cargo del área legal — aquí solo se simula.</p>
+  </div>
+
+  <div class="view" id="view-seguimiento">
+    <span class="back-link" id="segBackLink">&larr; Volver</span>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <strong id="pacienteTitulo" style="font-size:1.05rem;"></strong>
+        <span class="paciente-item-sub" id="pacienteSub"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Producto y forma de uso</div>
+      <div class="field-block">
+        <span class="field-label">Producto utilizado</span>
+        <div class="select-wrap">
+          <select id="productoSelect">
+            <option>Indigo</option>
+            <option>Heridas</option>
+            <option>Herpes</option>
+            <option>Inmuna</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-block" id="formatoProductoBlock" style="display:none;">
+        <span class="field-label">Formato</span>
+        <div class="chip-row" id="formatoProductoChips">
+          <button type="button" class="chip-btn" data-value="Spray">Spray</button>
+          <button type="button" class="chip-btn" data-value="Crema">Crema</button>
+          <button type="button" class="chip-btn" data-value="Gel">Gel</button>
+        </div>
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Desde cuándo lo usa</span>
+          <input type="text" class="text-input" id="desdeCuando" placeholder="Ej. 3 semanas">
+        </div>
+        <div>
+          <span class="field-label">Frecuencia / dosis</span>
+          <input type="text" class="text-input" id="frecuenciaDosis" placeholder="Ej. 2 veces al día">
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Tiempo total de uso de la molécula</span>
+        <span class="field-hint">Especialmente relevante si ya no la sigue usando</span>
+        <input type="text" class="text-input" id="tiempoTotalUso" placeholder="Ej. 2 meses en total">
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Vía de aplicación</span>
+          <input type="text" class="text-input" id="viaAplicacion" placeholder="Ej. Oral, tópica, inyectada...">
+        </div>
+        <div>
+          <span class="field-label">¿A los cuántos días notó resultados?</span>
+          <input type="number" class="text-input" id="diasResultados" placeholder="Ej. 10">
+        </div>
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Peso actual</span>
+          <span class="field-hint">Se pregunta en cada visita para ver la tendencia real</span>
+          <div class="num-input"><input type="number" class="text-input" id="pesoActual" placeholder="0"><span class="unit">kg</span></div>
+        </div>
+        <div>
+          <span class="field-label">¿Hubo cambio de dosis?</span>
+          <div class="toggle-row" id="cambioDosisToggle">
+            <button type="button" class="toggle-btn" data-value="true">Sí</button>
+            <button type="button" class="toggle-btn" data-value="false">No</button>
+          </div>
+          <span class="field-hint" id="cambioDosisHint" style="display:none;margin-top:.5rem;">Actualiza "Frecuencia / dosis" arriba con el nuevo valor.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Diagnóstico</div>
+      <div class="field-block">
+        <span class="field-label">Diagnóstico actual</span>
+        <textarea class="text-input" id="condicionAtendida" rows="2" placeholder="En sus propias palabras..."></textarea>
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Estado antes de usar el producto</span>
+          <textarea class="text-input" id="estadoAntes" rows="2" placeholder="Campo libre..."></textarea>
+        </div>
+        <div>
+          <span class="field-label">Estado después / evolución</span>
+          <textarea class="text-input" id="estadoDespues" rows="2" placeholder="Campo libre..."></textarea>
+        </div>
+      </div>
+      <div class="row-2 field-block">
+        <div>
+          <span class="field-label">Evolución general</span>
+          <div class="chip-row" id="evolucionChips">
+            <button type="button" class="chip-btn mejoro" data-value="mejoró">Mejoró</button>
+            <button type="button" class="chip-btn empeoro" data-value="empeoró">Empeoró</button>
+            <button type="button" class="chip-btn sincambio" data-value="sin cambio">Sin cambio</button>
+          </div>
+        </div>
+        <div>
+          <span class="field-label">Gravedad de la enfermedad</span>
+          <div class="chip-row" id="gravedadChips">
+            <button type="button" class="chip-btn" data-value="Leve">Leve</button>
+            <button type="button" class="chip-btn" data-value="Moderada">Moderada</button>
+            <button type="button" class="chip-btn" data-value="Grave">Grave</button>
+          </div>
+        </div>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Suplementación adicional</span>
+        <span class="field-hint">Si se encuentra tomando otro tipo de suplementación, vitaminas o similares</span>
+        <textarea class="text-input" id="suplementacion" rows="2" placeholder="Campo libre..."></textarea>
+      </div>
+      <div class="field-block">
+        <span class="field-label">Actualizaciones de tratamiento</span>
+        <span class="field-hint">Cambios de medicamento, intervención, dieta, etc.</span>
+        <textarea class="text-input" id="actualizacionesTratamiento" rows="2" placeholder="Campo libre, opcional..."></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Tratamiento concurrente</div>
+      <div class="field-block">
+        <span class="field-label">¿Sigue también algún tratamiento médico o medicamento para esta condición?</span>
+        <div class="toggle-row" id="tieneTratamientoToggle">
+          <button type="button" class="toggle-btn" data-value="true">Sí</button>
+          <button type="button" class="toggle-btn" data-value="false">No</button>
+        </div>
+      </div>
+      <div id="tratamientoDetalle" style="display:none;">
+        <div id="tratamientosContainer"></div>
+        <span class="add-link" onclick="agregarTratamiento()">+ Agregar otro tratamiento</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Síntomas secundarios</div>
+      <span class="field-hint" style="margin-top:0;">Del tratamiento concurrente de la persona, no del producto D'rea</span>
+      <div id="sintomasContainer"></div>
+      <span class="add-link" onclick="agregarSintoma()">+ Agregar otro síntoma</span>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Efectos secundarios</div>
+      <span class="field-hint" style="margin-top:0;">Específicamente del producto D'rea</span>
+      <div id="efectosContainer"></div>
+      <span class="add-link" onclick="agregarEfecto()">+ Agregar otro efecto</span>
+    </div>
+
+    <div class="card">
+      <span class="field-label">Antecedentes y testimonios</span>
+      <span class="field-hint">Escribe o graba una nota de voz — se transcribe automáticamente aquí</span>
+      <div class="mic-row">
+        <textarea id="antecedentesTestimonios" rows="3" class="text-input" placeholder="Lo que el paciente quiera compartir..."></textarea>
+        <button type="button" class="mic-btn" id="micBtn" title="Grabar nota de voz">🎤</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Evidencia (fotos / documentos)</div>
+      <div class="field-block">
+        <span class="field-label">Momento</span>
+        <div class="chip-row" id="momentoChips">
+          <button type="button" class="chip-btn" data-value="Antes">Antes del tratamiento</button>
+          <button type="button" class="chip-btn" data-value="Durante">Durante el seguimiento</button>
+          <button type="button" class="chip-btn" data-value="Después">Después del tratamiento</button>
+        </div>
+      </div>
+      <div class="file-dropzone" id="fileDropzone">Toca para simular la subida (máx. 100 por paciente, fotos y documentos combinados)</div>
+      <div class="file-grid" id="fileGrid"></div>
+      <div class="file-count" id="fileCount">0 / 100 archivos</div>
+    </div>
+
+    <button class="save-btn" id="saveBtn">Guardar seguimiento</button>
+    <p class="foot-note">Al guardar, esto quedaría en registro_seguimiento, tratamiento_concurrente, sintoma_reportado, efecto_secundario y archivo — aquí solo se simula, sin conexión real a base de datos.</p>
+  </div>
+
+</div>
+
+<div class="toast" id="toast">Seguimiento guardado (simulado) — así quedaría en las tablas de DREA</div>
+
+<script>
+let PACIENTES_EXISTENTES = [
+  {
+    id: 1,
+    nombreCompleto: "María Fernández López",
+    celular: "55 1234 5678",
+    edad: 52,
+    sexo: "Femenino",
+    region: "CDMX",
+    historial: [
+      { fecha: "18 may 2026", resumen: "Primera captura — dolor articular, inicia uso de Producto A", evolucion: null },
+      { fecha: "20 jun 2026", resumen: "Reporta menos dolor por las mañanas", evolucion: "mejoró" }
+    ]
+  },
+  {
+    id: 2,
+    nombreCompleto: "Roberto Díaz Nuñez",
+    celular: "33 9876 5432",
+    edad: 61,
+    sexo: "Masculino",
+    region: "Jalisco",
+    historial: [
+      { fecha: "03 jul 2026", resumen: "Primera captura — acompañamiento oncológico, inicia Producto Cáncer", evolucion: "sin cambio" }
+    ]
+  }
+];
+
+let currentPacienteId = null;
+let sintomaCount = 0;
+
+const views = ['start', 'existing-list', 'existing-historial', 'new-form', 'seguimiento', 'encuesta'];
+function goTo(name) {
+  views.forEach(v => document.getElementById('view-' + v).classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+}
+
+function labelPaciente(p) {
+  return `${p.nombreCompleto} · ${p.edad} años · ${p.sexo} · ${p.region}`;
+}
+
+function mostrarContrato() {
+  const nombre = document.getElementById('nuevoNombreCompleto').value || '[Nombre del paciente]';
+  const edad = document.getElementById('nuevaEdad').value || '[edad]';
+  const region = document.getElementById('nuevaRegion').value || '[región]';
+  const celular = document.getElementById('nuevoCelular').value || '[celular]';
+  const hoy = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  const cuerpo = `En la ciudad correspondiente a ${region}, con fecha ${hoy}, el paciente ` +
+    `<strong>${nombre}</strong>, de ${edad} años, con número de contacto ${celular}, manifiesta su ` +
+    `conformidad con los siguientes puntos: (1) Consentimiento de datos — autoriza expresamente el uso ` +
+    `de su información personal y de salud para fines de analítica segmentada y mejora de producto, ` +
+    `conforme a la LFPDPPP. (2) Responsabilidad de consumo — declara que el uso de los productos de ` +
+    `D'rea es bajo su entera responsabilidad, entendiendo que no sustituyen tratamiento médico ` +
+    `profesional, liberando a D'rea de responsabilidad por las consecuencias derivadas de su decisión ` +
+    `de consumo.`;
+
+  document.getElementById('contratoCuerpo').innerHTML = cuerpo;
+  document.getElementById('fechaContrato').textContent = 'Fecha: ' + hoy;
+  document.getElementById('contratoPreview').classList.add('show');
+}
+
+function renderPacienteList() {
+  const c = document.getElementById('pacienteListContainer');
+  c.innerHTML = '';
+  PACIENTES_EXISTENTES.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'paciente-item';
+    item.innerHTML = `
+      <div>
+        <div class="paciente-item-title">${labelPaciente(p)}</div>
+        <div class="paciente-item-sub">${p.historial.length} seguimiento(s) registrado(s)</div>
+      </div>
+      <div class="paciente-item-arrow">&rsaquo;</div>
+    `;
+    item.addEventListener('click', () => openHistorial(p.id));
+    c.appendChild(item);
+  });
+}
+renderPacienteList();
+
+function evolucionClass(ev) {
+  if (ev === 'mejoró') return 'mejoro';
+  if (ev === 'empeoró') return 'empeoro';
+  if (ev === 'sin cambio') return 'sincambio';
+  return '';
+}
+
+function openHistorial(id) {
+  currentPacienteId = id;
+  const p = PACIENTES_EXISTENTES.find(x => x.id === id);
+  document.getElementById('historialTitulo').textContent = labelPaciente(p);
+  document.getElementById('historialSub').textContent = `${p.historial.length} seguimiento(s)`;
+  const hc = document.getElementById('historialContainer');
+  hc.innerHTML = '';
+  p.historial.slice().reverse().forEach(h => {
+    const row = document.createElement('div');
+    row.className = 'historial-item';
+    const evoBadge = h.evolucion ? `<span class="historial-evolucion ${evolucionClass(h.evolucion)}">${h.evolucion}</span>` : '';
+    row.innerHTML = `
+      <div class="historial-dot"></div>
+      <div>
+        <div class="historial-fecha">${h.fecha}</div>
+        <div class="historial-resumen">${h.resumen}</div>
+        ${evoBadge}
+      </div>
+    `;
+    hc.appendChild(row);
+  });
+  goTo('existing-historial');
+}
+
+document.getElementById('agregarSeguimientoBtn').addEventListener('click', () => {
+  document.getElementById('segBackLink').onclick = () => goTo('existing-historial');
+  abrirFormularioSeguimiento();
+  goTo('seguimiento');
+});
+
+// --- Botones de ejemplo (rellenan texto libre) ---
+function agregarEjemplo(fieldId, texto) {
+  const el = document.getElementById(fieldId);
+  if (!el.value) {
+    el.value = texto;
+  } else if (!el.value.includes(texto)) {
+    el.value += ', ' + texto;
+  }
+}
+
+// --- Chips de sexo (paciente nuevo) ---
+document.querySelectorAll('#nuevoSexoChips .chip-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#nuevoSexoChips .chip-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+document.getElementById('crearPacienteBtn').addEventListener('click', () => {
+  const nombreCompleto = document.getElementById('nuevoNombreCompleto').value || '(sin nombre)';
+  const celular = document.getElementById('nuevoCelular').value || '(sin celular)';
+  const edad = parseInt(document.getElementById('nuevaEdad').value) || 0;
+  const sexoBtn = document.querySelector('#nuevoSexoChips .chip-btn.active');
+  const sexo = sexoBtn ? sexoBtn.dataset.value : '(no especificado)';
+  const region = document.getElementById('nuevaRegion').value || '(no especificada)';
+  const estatura = document.getElementById('nuevaEstatura').value || null;
+  const pesoHabitual = document.getElementById('nuevoPesoHabitual').value || null;
+  const fechaDiagnostico = document.getElementById('nuevaFechaDiagnostico').value || null;
+  const fechaInicioSintomas = document.getElementById('nuevaFechaInicioSintomas').value || null;
+
+  const nuevo = {
+    id: PACIENTES_EXISTENTES.length + 1, nombreCompleto, celular, edad, sexo, region,
+    estatura, pesoHabitual, fechaDiagnostico, fechaInicioSintomas, historial: []
+  };
+  PACIENTES_EXISTENTES.push(nuevo);
+  currentPacienteId = nuevo.id;
+
+  document.getElementById('segBackLink').onclick = () => goTo('new-form');
+  abrirFormularioSeguimiento();
+  goTo('seguimiento');
+});
+
+// --- Formato de producto (condicional a Heridas/Herpes) ---
+const PRODUCTOS_CON_FORMATO = ['Heridas', 'Herpes'];
+function actualizarFormatoProductoVisibilidad() {
+  const visible = PRODUCTOS_CON_FORMATO.includes(document.getElementById('productoSelect').value);
+  document.getElementById('formatoProductoBlock').style.display = visible ? '' : 'none';
+}
+document.getElementById('productoSelect').addEventListener('change', actualizarFormatoProductoVisibilidad);
+document.querySelectorAll('#formatoProductoChips .chip-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#formatoProductoChips .chip-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// --- Chips de evolución ---
+document.querySelectorAll('#evolucionChips .chip-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#evolucionChips .chip-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// --- Chips de gravedad ---
+document.querySelectorAll('#gravedadChips .chip-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#gravedadChips .chip-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// --- Toggle cambio de dosis ---
+document.querySelectorAll('#cambioDosisToggle .toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#cambioDosisToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('cambioDosisHint').style.display = btn.dataset.value === 'true' ? 'block' : 'none';
+  });
+});
+
+// --- Chips de momento (evidencia) ---
+document.querySelectorAll('#momentoChips .chip-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#momentoChips .chip-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// --- Toggle tratamiento concurrente ---
+document.querySelectorAll('#tieneTratamientoToggle .toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#tieneTratamientoToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const mostrar = btn.dataset.value === 'true';
+    document.getElementById('tratamientoDetalle').style.display = mostrar ? 'block' : 'none';
+    if (mostrar && document.getElementById('tratamientosContainer').children.length === 0) {
+      agregarTratamiento();
+    }
+  });
+});
+
+// --- Tratamientos concurrentes (N) ---
+let tratamientoCount = 0;
+function agregarTratamiento() {
+  tratamientoCount++;
+  const id = 'trat_' + tratamientoCount;
+  const block = document.createElement('div');
+  block.className = 'repeat-block';
+  block.id = id;
+  block.innerHTML = `
+    <span class="repeat-block-title">Tratamiento</span>
+    <button type="button" class="remove-block-btn" onclick="document.getElementById('${id}').remove()">&times;</button>
+    <div class="field-block">
+      <span class="field-label">¿Cuál tratamiento?</span>
+      <span class="field-hint">Ej. "Metformina", "Quimioprofiláctica"</span>
+      <input type="text" class="text-input trat-nombre" placeholder="Ej. Metformina">
+    </div>
+    <div class="row-2 field-block">
+      <div>
+        <span class="field-label">Dosis</span>
+        <input type="text" class="text-input trat-dosis" placeholder="Ej. 500mg cada 12h">
+      </div>
+      <div>
+        <span class="field-label">Desde cuándo</span>
+        <input type="text" class="text-input trat-desde" placeholder="Ej. 2 años">
+      </div>
+    </div>
+    <div class="field-block">
+      <span class="field-label">¿Es el mismo tratamiento que antes?</span>
+      <div class="toggle-row trat-mismo-toggle">
+        <button type="button" class="toggle-btn" data-value="true">Sí</button>
+        <button type="button" class="toggle-btn" data-value="false">No, es diferente</button>
+      </div>
+    </div>
+  `;
+  block.querySelectorAll('.trat-mismo-toggle .toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      block.querySelectorAll('.trat-mismo-toggle .toggle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  document.getElementById('tratamientosContainer').appendChild(block);
+}
+
+// --- Efectos secundarios del producto (N) ---
+let efectoCount = 0;
+function agregarEfecto() {
+  efectoCount++;
+  const id = 'efecto_' + efectoCount;
+  const block = document.createElement('div');
+  block.className = 'repeat-block';
+  block.id = id;
+  block.innerHTML = `
+    <span class="repeat-block-title">Efecto secundario</span>
+    <button type="button" class="remove-block-btn" onclick="document.getElementById('${id}').remove()">&times;</button>
+    <div class="field-block">
+      <span class="field-label">Descripción</span>
+      <textarea class="text-input efecto-texto" rows="2" placeholder="Cualquier efecto secundario del producto D'rea..."></textarea>
+    </div>
+    <div class="field-block">
+      <span class="field-label">Tipo</span>
+      <div class="chip-row efecto-tipo-chips">
+        <button type="button" class="chip-btn" data-value="Positivo">Positivo</button>
+        <button type="button" class="chip-btn" data-value="Negativo">Negativo</button>
+      </div>
+    </div>
+    <div class="row-2 field-block">
+      <div>
+        <span class="field-label">Fecha de inicio</span>
+        <input type="date" class="text-input efecto-fecha">
+      </div>
+      <div>
+        <span class="field-label">Frecuencia</span>
+        <div class="chip-row efecto-freq-chips">
+          <button type="button" class="chip-btn" data-value="Frecuente">Frecuente</button>
+          <button type="button" class="chip-btn" data-value="Esporádico">Esporádico</button>
+        </div>
+      </div>
+    </div>
+    <div class="field-block">
+      <span class="field-label">Plazo</span>
+      <div class="chip-row efecto-plazo-chips">
+        <button type="button" class="chip-btn" data-value="Corto plazo">Corto plazo</button>
+        <button type="button" class="chip-btn" data-value="Largo plazo">Largo plazo</button>
+      </div>
+    </div>
+  `;
+  ['efecto-tipo-chips', 'efecto-freq-chips', 'efecto-plazo-chips'].forEach(cls => {
+    block.querySelectorAll('.' + cls + ' .chip-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        block.querySelectorAll('.' + cls + ' .chip-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  });
+  document.getElementById('efectosContainer').appendChild(block);
+}
+
+// --- Archivos (máx 100, simulado) ---
+let fileCount = 0;
+document.getElementById('fileDropzone').addEventListener('click', () => {
+  if (fileCount >= 100) return;
+  fileCount++;
+  const thumb = document.createElement('div');
+  thumb.className = 'file-thumb';
+  const thisIndex = fileCount;
+  thumb.innerHTML = `Arch. ${thisIndex}<button class="rm" type="button">&times;</button>`;
+  thumb.querySelector('.rm').addEventListener('click', (e) => {
+    e.stopPropagation();
+    thumb.remove();
+    fileCount--;
+    actualizarFileCount();
+  });
+  document.getElementById('fileGrid').appendChild(thumb);
+  actualizarFileCount();
+});
+function actualizarFileCount() {
+  const el = document.getElementById('fileCount');
+  el.textContent = fileCount + ' / 100 archivos';
+  el.classList.toggle('limit', fileCount >= 100);
+}
+
+// --- Nota de voz (simulada) para antecedentes/testimonios ---
+const FRASES_DEMO_VOZ_DREA = [
+  "El paciente comenta que se siente con más energía por las mañanas desde hace dos semanas.",
+  "Su familia nota que ha mejorado el ánimo, aunque el dolor sigue presente por las noches.",
+  "Menciona que le gustaría recomendar el producto a otros pacientes con su misma condición."
+];
+let isRecordingDrea = false;
+document.getElementById('micBtn').addEventListener('click', () => {
+  const btn = document.getElementById('micBtn');
+  const textarea = document.getElementById('antecedentesTestimonios');
+  if (!isRecordingDrea) {
+    isRecordingDrea = true;
+    btn.classList.add('recording');
+    btn.textContent = '⏹';
+  } else {
+    isRecordingDrea = false;
+    btn.classList.remove('recording');
+    btn.textContent = '🎤';
+    const frase = FRASES_DEMO_VOZ_DREA[Math.floor(Math.random() * FRASES_DEMO_VOZ_DREA.length)];
+    textarea.value = (textarea.value ? textarea.value + ' ' : '') + '[Transcrito de audio] ' + frase;
+  }
+});
+
+// --- Síntomas dinámicos ---
+function agregarSintoma() {
+  sintomaCount++;
+  const id = 'sintoma_' + sintomaCount;
+  const row = document.createElement('div');
+  row.className = 'sintoma-row';
+  row.id = id;
+  row.innerHTML = `
+    <input type="text" class="text-input" placeholder="Ej. náusea, mareo...">
+    <div class="sintoma-freq">
+      <button type="button" class="chip-btn freq-btn" data-value="frecuente">Frecuente</button>
+      <button type="button" class="chip-btn freq-btn" data-value="esporádico">Esporádico</button>
+    </div>
+    <button type="button" class="remove-btn" onclick="document.getElementById('${id}').remove()">&times;</button>
+  `;
+  row.querySelectorAll('.freq-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      row.querySelectorAll('.freq-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  document.getElementById('sintomasContainer').appendChild(row);
+}
+
+function abrirFormularioSeguimiento() {
+  const p = PACIENTES_EXISTENTES.find(x => x.id === currentPacienteId);
+  document.getElementById('pacienteTitulo').textContent = labelPaciente(p);
+  document.getElementById('pacienteSub').textContent = `${p.historial.length} seguimiento(s) previo(s)`;
+
+  // reset form
+  document.getElementById('desdeCuando').value = '';
+  document.getElementById('tiempoTotalUso').value = '';
+  document.getElementById('frecuenciaDosis').value = '';
+  document.getElementById('productoSelect').value = 'Indigo';
+  document.getElementById('viaAplicacion').value = '';
+  document.getElementById('diasResultados').value = '';
+  document.getElementById('pesoActual').value = '';
+  document.getElementById('condicionAtendida').value = '';
+  document.getElementById('estadoAntes').value = '';
+  document.getElementById('estadoDespues').value = '';
+  document.getElementById('suplementacion').value = '';
+  document.getElementById('actualizacionesTratamiento').value = '';
+  document.getElementById('antecedentesTestimonios').value = '';
+
+  document.querySelectorAll('#evolucionChips .chip-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#gravedadChips .chip-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#cambioDosisToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#momentoChips .chip-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('cambioDosisHint').style.display = 'none';
+
+  document.querySelectorAll('#formatoProductoChips .chip-btn').forEach(b => b.classList.remove('active'));
+  actualizarFormatoProductoVisibilidad();
+
+  document.querySelectorAll('#tieneTratamientoToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tratamientoDetalle').style.display = 'none';
+  document.getElementById('tratamientosContainer').innerHTML = '';
+  tratamientoCount = 0;
+
+  document.getElementById('sintomasContainer').innerHTML = '';
+  sintomaCount = 0;
+  agregarSintoma();
+
+  document.getElementById('efectosContainer').innerHTML = '';
+  efectoCount = 0;
+  agregarEfecto();
+
+  document.getElementById('fileGrid').innerHTML = '';
+  fileCount = 0;
+  actualizarFileCount();
+}
+
+document.getElementById('saveBtn').addEventListener('click', () => {
+  const p = PACIENTES_EXISTENTES.find(x => x.id === currentPacienteId);
+  const evoBtn = document.querySelector('#evolucionChips .chip-btn.active');
+  const evolucion = evoBtn ? evoBtn.dataset.value : null;
+  const condicion = document.getElementById('condicionAtendida').value || 'Seguimiento registrado';
+
+  if (p) {
+    const hoy = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' });
+    p.historial.push({ fecha: hoy, resumen: condicion, evolucion: evolucion });
+  }
+
+  const toast = document.getElementById('toast');
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2600);
+});
+
+// --- Botón Mascotas (ilustrativo, sin funcionalidad) ---
+document.getElementById('mascotaBtn').addEventListener('click', () => {
+  const toast = document.getElementById('toast');
+  const original = toast.textContent;
+  toast.textContent = 'El formulario de Mascotas llegará próximamente';
+  toast.classList.add('show');
+  setTimeout(() => { toast.classList.remove('show'); toast.textContent = original; }, 2200);
+});
+
+// --- Encuesta de salida ---
+function abrirEncuesta() {
+  document.querySelectorAll('#recomendariaToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#precioChips .chip-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#continuarToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('motivoNoContinuarBlock').style.display = 'none';
+  document.getElementById('motivoNoContinuar').value = '';
+  goTo('encuesta');
+}
+document.querySelectorAll('#recomendariaToggle .toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#recomendariaToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+document.querySelectorAll('#precioChips .chip-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#precioChips .chip-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+document.querySelectorAll('#continuarToggle .toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#continuarToggle .toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('motivoNoContinuarBlock').style.display = btn.dataset.value === 'false' ? 'block' : 'none';
+  });
+});
+document.getElementById('saveEncuestaBtn').addEventListener('click', () => {
+  const toast = document.getElementById('toast');
+  const original = toast.textContent;
+  toast.textContent = 'Encuesta guardada (simulado)';
+  toast.classList.add('show');
+  setTimeout(() => { toast.classList.remove('show'); toast.textContent = original; goTo('existing-historial'); }, 1800);
+});
+</script>
+</body>
+</html>
