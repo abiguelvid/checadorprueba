@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nanofactor Global — Presentación de Impacto IA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green-50:#f0faf4;--green-100:#d6f2e0;--green-200:#a8e0bc;--green-400:#4caf78;
+    --green-500:#2e9156;--green-600:#1e7040;--green-700:#155230;
+    --amber-100:#fef3c7;--amber-500:#f59e0b;--amber-700:#b45309;
+    --ink:#0f1f16;--ink-light:#3a5445;--ink-muted:#6b8c7a;
+    --surface:#f7fbf8;--surface-2:#edf7f1;--border:#cde8d6;--white:#ffffff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',sans-serif;background:var(--surface);color:var(--ink);min-height:100vh}
+
+  /* Header */
+  .header{background:var(--green-700);padding:48px 64px 40px;color:var(--white)}
+  .header-eyebrow{font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--green-200);margin-bottom:12px}
+  .header-title{font-size:36px;font-weight:800;line-height:1.15;margin-bottom:8px}
+  .header-sub{font-size:15px;color:rgba(255,255,255,.7);font-weight:400}
+
+  .main{max-width:1160px;margin:0 auto;padding:56px 40px 100px}
+
+  /* Section */
+  .section-title{font-size:10.5px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:24px;display:flex;align-items:center;gap:10px}
+  .section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+  .section-gap{margin-bottom:56px}
+
+  /* KPI hero */
+  .kpi-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:56px}
+  .kpi-hero-card{background:var(--white);border:1.5px solid var(--border);border-radius:14px;padding:28px 24px;position:relative;overflow:hidden;animation:fadeUp .5s ease both}
+  .kpi-hero-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:var(--green-400);border-radius:14px 14px 0 0}
+  .kpi-hero-card.dark{background:var(--green-700);border-color:var(--green-600)}
+  .kpi-hero-card.dark::before{background:var(--green-200)}
+  .kpi-hero-card:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(46,145,86,.1);transition:all .2s}
+  .kpi-label{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:12px}
+  .kpi-hero-card.dark .kpi-label{color:rgba(168,224,188,.8)}
+  .kpi-value{font-size:36px;font-weight:800;color:var(--ink);line-height:1;margin-bottom:6px}
+  .kpi-hero-card.dark .kpi-value{color:var(--white)}
+  .kpi-sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-muted)}
+  .kpi-hero-card.dark .kpi-sub{color:rgba(168,224,188,.7)}
+  .kpi-hero-card:nth-child(1){animation-delay:.05s}.kpi-hero-card:nth-child(2){animation-delay:.1s}.kpi-hero-card:nth-child(3){animation-delay:.15s}.kpi-hero-card:nth-child(4){animation-delay:.2s}
+
+  /* Impact summary */
+  .impact-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:56px}
+  .impact-card{background:var(--white);border:1.5px solid var(--border);border-radius:12px;padding:22px 20px;animation:fadeUp .5s ease both;animation-delay:.25s}
+  .impact-card-title{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+  .impact-big{font-size:32px;font-weight:800;color:var(--green-600);line-height:1;margin-bottom:4px}
+  .impact-label{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-muted);margin-bottom:14px}
+  .impact-rows{display:flex;flex-direction:column;gap:7px}
+  .impact-row{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-light)}
+  .impact-row span:last-child{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--green-500);font-weight:500}
+
+  /* Proyectos */
+  .proyectos-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-bottom:56px}
+  .proyecto-card{background:var(--white);border:1.5px solid var(--border);border-radius:14px;padding:26px 24px;animation:fadeUp .5s ease both;animation-delay:.3s;display:flex;flex-direction:column;gap:14px}
+  .proyecto-header{display:flex;justify-content:space-between;align-items:flex-start}
+  .proyecto-bus{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;align-items:center}
+  .bu-tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:var(--surface-2);color:var(--ink-muted);border:1px solid var(--border)}
+  .estado-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .estado-listo{background:#dff2e8;color:#1e7040}
+  .estado-progreso{background:var(--amber-100);color:var(--amber-700)}
+  .proyecto-nombre{font-size:16px;font-weight:700;color:var(--ink);line-height:1.3}
+  .proyecto-desc{font-size:13px;color:var(--ink-muted);line-height:1.6}
+  .proyecto-impacto{background:var(--surface-2);border-radius:8px;padding:14px 16px}
+  .impacto-title{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:8px}
+  .impacto-list{list-style:none;display:flex;flex-direction:column;gap:5px}
+  .impacto-list li{font-size:12.5px;color:var(--ink-light);padding-left:14px;position:relative;line-height:1.5}
+  .impacto-list li::before{content:'→';position:absolute;left:0;color:var(--green-400);font-size:11px}
+
+  /* Propuestas */
+  .propuestas-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:56px}
+  .propuesta-card{background:var(--white);border:1.5px dashed var(--border);border-radius:14px;padding:24px 22px;display:flex;flex-direction:column;gap:14px;position:relative;animation:fadeUp .5s ease both;animation-delay:.35s}
+  .propuesta-card::before{content:'PROPUESTA';position:absolute;top:16px;right:16px;font-size:9px;font-weight:700;letter-spacing:.12em;color:var(--green-400);background:var(--green-50);border:1px solid var(--green-200);border-radius:4px;padding:2px 7px}
+  .propuesta-nombre{font-size:15px;font-weight:700;color:var(--ink);line-height:1.3;padding-right:70px}
+  .propuesta-desc{font-size:12.5px;color:var(--ink-muted);line-height:1.6}
+  .propuesta-caps{background:var(--surface-2);border-radius:8px;padding:14px 16px}
+  .caps-title{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:8px}
+  .caps-list{list-style:none;display:flex;flex-direction:column;gap:5px}
+  .caps-list li{font-size:12px;color:var(--ink-light);padding-left:14px;position:relative;line-height:1.5}
+  .caps-list li::before{content:'·';position:absolute;left:4px;color:var(--green-400);font-weight:700}
+  .propuesta-footer{display:flex;flex-direction:column;gap:6px;padding-top:4px;border-top:1px solid var(--border)}
+  .propuesta-impacto,.propuesta-viab{font-size:12px;color:var(--ink-muted);line-height:1.5}
+  .propuesta-impacto strong,.propuesta-viab strong{color:var(--ink);}
+
+  /* Cierre */
+  .cierre{background:var(--green-700);border-radius:16px;padding:40px 48px;color:var(--white);margin-bottom:0;display:grid;grid-template-columns:1fr 1fr;gap:40px;animation:fadeUp .5s ease both;animation-delay:.4s}
+  .cierre-title{font-size:22px;font-weight:800;margin-bottom:8px}
+  .cierre-sub{font-size:13.5px;color:rgba(255,255,255,.7);line-height:1.7}
+  .cierre-stats{display:flex;flex-direction:column;gap:12px}
+  .cierre-stat{display:flex;justify-content:space-between;align-items:baseline;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.1)}
+  .cierre-stat:last-child{border-bottom:none}
+  .cierre-stat-label{font-size:13px;color:rgba(255,255,255,.7)}
+  .cierre-stat-value{font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:600;color:var(--green-200)}
+
+  @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-eyebrow">Nanofactor Global · Agosto 2026</div>
+  <div class="header-title">Impacto de Tecnología e Inteligencia Artificial</div>
+  <div class="header-sub">Proyectos implementados, métricas confirmadas y resumen ejecutivo</div>
+</div>
+
+<div class="main">
+
+  <!-- KPIs principales -->
+  <div class="section-title section-gap">Impacto Directo</div>
+  <div class="kpi-hero">
+    <div class="kpi-hero-card dark">
+      <div class="kpi-label">Ventas Brutas Generadas por IA</div>
+      <div class="kpi-value">$249.8k</div>
+      <div class="kpi-sub">MXN ventas brutas confirmadas (feb–ago 2026)</div>
+    </div>
+    <div class="kpi-hero-card">
+      <div class="kpi-label">Ahorro en Licencias</div>
+      <div class="kpi-value">$197.6k</div>
+      <div class="kpi-sub">MXN/año · consolidación Zoho (No incluye el ERP (Finanzas y Logística))</div>
+    </div>
+    <div class="kpi-hero-card">
+      <div class="kpi-label">Horas Humanas Liberadas</div>
+      <div class="kpi-value">204.0 h</div>
+      <div class="kpi-sub">agentes IA + generador anuncios</div>
+    </div>
+    <div class="kpi-hero-card">
+      <div class="kpi-label">Usuarios Atendidos por IA</div>
+      <div class="kpi-value">3,883</div>
+    </div>
+  </div>
+
+  <!-- Desglose impacto -->
+  <div class="section-title section-gap">Desglose de Impacto por Iniciativa</div>
+  <div class="impact-grid">
+    <div class="impact-card">
+      <div class="impact-card-title">Agentes IA — Ventas Brutas</div>
+      <div class="impact-big">$147,830.11</div>
+      <div class="impact-label">MXN brutos atribuibles a los agentes</div>
+      <div class="impact-rows">
+        <div class="impact-row"><span>Usuarios atendidos</span><span>3,883</span></div>
+        <div class="impact-row"><span>Compradores confirmados</span><span>89</span></div>
+        <div class="impact-row"><span>Tasa de conversión</span><span>2.3%</span></div>
+        <div class="impact-row"><span>Horas de atención ahorradas</span><span>194.2 h</span></div>
+      </div>
+    </div>
+    <div class="impact-card">
+      <div class="impact-card-title">Recordatorios — Recompra</div>
+      <div class="impact-big">$101,955.44</div>
+      <div class="impact-label">MXN en revenue bruto post-recordatorio</div>
+      <div class="impact-rows">
+        <div class="impact-row"><span>Respondieron sí</span><span>209</span></div>
+        <div class="impact-row"><span>Rechazaron</span><span>151</span></div>
+        <div class="impact-row"><span>Recompraron</span><span>65</span></div>
+      </div>
+    </div>
+    <div class="impact-card">
+      <div class="impact-card-title">Generador de Anuncios</div>
+      <div class="impact-big">1.2 días</div>
+      <div class="impact-label">laborales ahorrados al mes</div>
+      <div class="impact-rows">
+        <div class="impact-row"><span>Imágenes generadas/mes</span><span>300</span></div>
+        <div class="impact-row"><span>Sin herramienta</span><span>10.0 hrs/mes</span></div>
+        <div class="impact-row"><span>Con bulk</span><span>~15 min/mes</span></div>
+        <div class="impact-row"><span>Horas ahorradas/mes</span><span>9.8 h</span></div>
+      </div>
+    </div>
+    <div class="impact-card">
+      <div class="impact-card-title">Consolidación Zoho — Ahorro</div>
+      <div class="impact-big">$16,468</div>
+      <div class="impact-label">MXN ahorro neto mensual en licencias</div>
+      <div class="impact-rows">
+        <div class="impact-row"><span>Plataformas consolidadas</span><span>8 → 1</span></div>
+        <div class="impact-row"><span>Costo Zoho One (25 usu.)</span><span>$15,000/mes</span></div>
+        <div class="impact-row"><span>Ahorro neto mensual</span><span>$16,468</span></div>
+        <div class="impact-row"><span>Ahorro anual</span><span>$197,615</span></div>
+        <div class="impact-row"><span>No incluye ERP</span><span>Books + Inventory</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Proyectos -->
+  <div class="section-title section-gap">Proyectos Realizados con Más Impacto</div>
+  <div class="proyectos-grid">
+    <div class="proyecto-card">
+      <div class="proyecto-header">
+        <div>
+          <div class="proyecto-bus"><span class="bu-tag">TRG</span><span class="bu-tag">Agrobotanix</span><span class="bu-tag">DREA</span><span class="estado-badge estado-listo">Implementado</span></div>
+          <h3 class="proyecto-nombre">Agentes IA — Atención al Cliente 24/7</h3>
+        </div>
+      </div>
+      <p class="proyecto-desc">Agentes conversacionales vía WhatsApp para las 3 unidades de negocio. Atienden dudas, recomiendan productos y acompañan al cliente en su proceso de compra sin intervención humana.</p>
+      <div class="proyecto-impacto">
+        <div class="impacto-title">Impacto</div>
+        <ul class="impacto-list"><li>3,883 usuarios atendidos (feb–ago 2026)</li><li>89 compradores confirmados</li><li>$147,830.11 MXN en ventas brutas atribuibles</li><li>194.2 horas de atención humana ahorradas</li><li>Disponibilidad 24/7 · Respuesta en menos de 30 segundos</li></ul>
+      </div>
+    </div>
+    <div class="proyecto-card">
+      <div class="proyecto-header">
+        <div>
+          <div class="proyecto-bus"><span class="bu-tag">TRG</span><span class="estado-badge estado-listo">Implementado</span></div>
+          <h3 class="proyecto-nombre">Sistema de Recordatorios Post-Venta</h3>
+        </div>
+      </div>
+      <p class="proyecto-desc">Sistema automatizado que envía recordatorios personalizados a clientes después de su compra para asegurar el uso correcto del producto y fomentar la recompra.</p>
+      <div class="proyecto-impacto">
+        <div class="impacto-title">Impacto</div>
+        <ul class="impacto-list"><li>1422 clientes contactados</li><li>209 respondieron sí</li><li>151 rechazaron el recordatorio</li><li>$101,955.44 MXN en revenue bruto post-recordatorio</li><li>55 recompraron</li></ul>
+      </div>
+    </div>
+    <div class="proyecto-card">
+      <div class="proyecto-header">
+        <div>
+          <div class="proyecto-bus"><span class="bu-tag">TRG</span><span class="bu-tag">Agrobotanix</span><span class="bu-tag">DREA</span><span class="estado-badge estado-listo">Implementado</span></div>
+          <h3 class="proyecto-nombre">Generador de Anuncios en Bulk</h3>
+        </div>
+      </div>
+      <p class="proyecto-desc">Herramienta que permite generar 300 imágenes publicitarias de forma masiva con un solo prompt. El director de marketing ejecuta en bulk lo que antes requería atención individual.</p>
+      <div class="proyecto-impacto">
+        <div class="impacto-title">Impacto</div>
+        <ul class="impacto-list"><li>300 imágenes/mes a 2 min c/u = 10.0 hrs sin la herramienta</li><li>Con bulk: ~15 min para lanzar las 300</li><li>9.8 hrs ahorradas/mes al director de marketing</li><li>1.2 días laborales liberados para trabajo estratégico</li><li>Integrado con GPT-4 · Listo para escalar a más volumen</li></ul>
+      </div>
+    </div>
+    <div class="proyecto-card">
+      <div class="proyecto-header">
+        <div>
+          <div class="proyecto-bus"><span class="bu-tag">Corporativo</span><span class="estado-badge estado-listo">Implementado</span></div>
+          <h3 class="proyecto-nombre">Project Manager NFG</h3>
+        </div>
+      </div>
+      <p class="proyecto-desc">App interna de gestión de proyectos y equipo, con conexión a la medida al CRM de Zoho para las necesidades operativas del equipo de Agrobotanix.</p>
+      <div class="proyecto-impacto">
+        <div class="impacto-title">Impacto</div>
+        <ul class="impacto-list"><li>Seguimiento centralizado de tareas y proyectos con alertas de retraso</li><li>Recordatorios automáticos de pendientes</li><li>Búsqueda de horarios disponibles para reuniones de equipo</li><li>Reconocimientos integrados al equipo</li><li>Conexión a la medida con Zoho CRM para necesidades de Agrobotanix</li></ul>
+      </div>
+    </div>
+    <div class="proyecto-card">
+      <div class="proyecto-header">
+        <div>
+          <div class="proyecto-bus"><span class="bu-tag">Corporativo</span><span class="estado-badge estado-listo">Implementado</span></div>
+          <h3 class="proyecto-nombre">Consolidación Zoho One — People y Analytics</h3>
+        </div>
+      </div>
+      <p class="proyecto-desc">Migración y unificación de 8 plataformas separadas (Slack, Google Suite, Sesame, Monday, Zapier, Albato y otras) a un ecosistema integrado en Zoho One, incluyendo RH, Analytics y otros.</p>
+      <div class="proyecto-impacto">
+        <div class="impacto-title">Impacto</div>
+        <ul class="impacto-list"><li>8 plataformas consolidadas en Zoho One</li><li>Zoho One: $15,000 MXN/mes (25 usuarios)</li><li>Ahorro neto: $16,468 MXN/mes vs plataformas anteriores</li><li>$197,615 MXN/año en licencias</li><li>Control de asistencias centralizado · Tablero RH en Zoho Analytics</li><li>Reglas de directivas, permisos y ubicaciones configuradas</li><li>No incluye ERP: Finanzas (Books) y Logística (Inventory)</li></ul>
+      </div>
+    </div></div>
+
+  <!-- Propuestas -->
+  <div class="section-title section-gap">Insights</div>
+  <div class="propuestas-grid"></div>
+
+  <!-- Cierre -->
+  <div class="cierre">
+    <div>
+      <div class="cierre-title">Resumen Ejecutivo</div>
+      <div class="cierre-sub">
+        La inversión en tecnología e IA ha generado impacto medible y directo en Nanofactor Global.
+        Los agentes y sistemas implementados no solo generan ventas y ahorran costos hoy — construyen la infraestructura
+        para escalar sin aumentar proporcionalmente el equipo humano.
+      </div>
+    </div>
+    <div class="cierre-stats">
+      <div class="cierre-stat">
+        <span class="cierre-stat-label">Ventas Brutas totales atribuibles a IA</span>
+        <span class="cierre-stat-value">$249,785.55 MXN</span>
+      </div>
+      <div class="cierre-stat">
+        <span class="cierre-stat-label">Ahorro anual en licencias</span>
+        <span class="cierre-stat-value">$197,615 MXN</span>
+      </div>
+      <div class="cierre-stat">
+        <span class="cierre-stat-label">Horas humanas liberadas</span>
+        <span class="cierre-stat-value">204.0 hrs/periodo</span>
+      </div>
+      <div class="cierre-stat">
+        <span class="cierre-stat-label">Plataformas consolidadas</span>
+        <span class="cierre-stat-value">8 → 1 (Zoho One)</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
