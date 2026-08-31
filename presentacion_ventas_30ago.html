@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nanofactor Global — Ventas Brutas por Agente y Recordatorios</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green-50:#f0faf4;--green-100:#d6f2e0;--green-200:#a8e0bc;--green-400:#4caf78;
+    --green-500:#2e9156;--green-600:#1e7040;--green-700:#155230;
+    --ink:#0f1f16;--ink-light:#3a5445;--ink-muted:#6b8c7a;
+    --surface:#f7fbf8;--surface-2:#edf7f1;--border:#cde8d6;--white:#ffffff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',sans-serif;background:var(--surface);color:var(--ink);min-height:100vh}
+
+  .header{background:var(--green-700);padding:48px 64px 40px;color:var(--white)}
+  .header-eyebrow{font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--green-200);margin-bottom:12px}
+  .header-title{font-size:36px;font-weight:800;line-height:1.15;margin-bottom:8px}
+  .header-sub{font-size:15px;color:rgba(255,255,255,.7);font-weight:400}
+
+  .main{max-width:1160px;margin:0 auto;padding:56px 40px 100px}
+
+  .section-title{font-size:10.5px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:24px;display:flex;align-items:center;gap:10px}
+  .section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+  .section-gap{margin-bottom:56px}
+
+  .kpi-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:56px}
+  .kpi-hero-card{background:var(--white);border:1.5px solid var(--border);border-radius:14px;padding:28px 24px;position:relative;overflow:hidden}
+  .kpi-hero-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:var(--green-400);border-radius:14px 14px 0 0}
+  .kpi-hero-card.dark{background:var(--green-700);border-color:var(--green-600)}
+  .kpi-hero-card.dark::before{background:var(--green-200)}
+  .kpi-label{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:12px}
+  .kpi-hero-card.dark .kpi-label{color:rgba(168,224,188,.8)}
+  .kpi-value{font-size:36px;font-weight:800;color:var(--ink);line-height:1;margin-bottom:6px}
+  .kpi-hero-card.dark .kpi-value{color:var(--white)}
+  .kpi-sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-muted)}
+  .kpi-hero-card.dark .kpi-sub{color:rgba(168,224,188,.7)}
+
+  .impact-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:56px}
+  .impact-card{background:var(--white);border:1.5px solid var(--border);border-radius:12px;padding:22px 20px}
+  .impact-card.span2{grid-column:span 2}
+  .impact-card-title{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+  .impact-big{font-size:32px;font-weight:800;color:var(--green-600);line-height:1;margin-bottom:4px}
+  .impact-label{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--ink-muted);margin-bottom:14px}
+  .impact-rows{display:flex;flex-direction:column;gap:7px}
+  .impact-row{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-light)}
+  .impact-row span:last-child{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--green-500);font-weight:500}
+
+  .proyectos-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-bottom:56px}
+  .proyecto-card{background:var(--white);border:1.5px solid var(--border);border-radius:14px;padding:26px 24px;display:flex;flex-direction:column;gap:14px}
+  .proyecto-header{display:flex;justify-content:space-between;align-items:flex-start}
+  .proyecto-bus{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;align-items:center}
+  .bu-tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:var(--surface-2);color:var(--ink-muted);border:1px solid var(--border)}
+  .estado-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .estado-listo{background:#dff2e8;color:#1e7040}
+  .proyecto-nombre{font-size:16px;font-weight:700;color:var(--ink);line-height:1.3}
+  .proyecto-desc{font-size:13px;color:var(--ink-muted);line-height:1.6}
+  .proyecto-impacto{background:var(--surface-2);border-radius:8px;padding:14px 16px}
+  .impacto-title{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:8px}
+  .impacto-list{list-style:none;display:flex;flex-direction:column;gap:5px}
+  .impacto-list li{font-size:12.5px;color:var(--ink-light);padding-left:14px;position:relative;line-height:1.5}
+  .impacto-list li::before{content:'→';position:absolute;left:0;color:var(--green-400);font-size:11px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-eyebrow">Nanofactor Global · Agosto 2026</div>
+  <div class="header-title">Ventas Brutas — Agentes IA y Sistema de Recordatorios</div>
+  <div class="header-sub">Desglose mensual, patrones de venta y productos top (feb–ago 2026)</div>
+</div>
+
+<div class="main">
+
+  <div class="section-title section-gap">Impacto Directo</div>
+  <div class="kpi-hero">
+    <div class="kpi-hero-card dark">
+      <div class="kpi-label">Ventas Totales Confirmadas</div>
+      <div class="kpi-value">$160,360.97</div>
+      <div class="kpi-sub">MXN · recordatorios + agentes confirmado (feb–ago 2026)</div>
+    </div>
+    <div class="kpi-hero-card">
+      <div class="kpi-label">Ventas Brutas — Recordatorios</div>
+      <div class="kpi-value">$102.0k</div>
+      <div class="kpi-sub">1422 clientes contactados</div>
+    </div>
+    <div class="kpi-hero-card">
+      <div class="kpi-label">Agentes Atención a Clientes</div>
+      <div class="kpi-value">$58,405.53</div>
+      <div class="kpi-sub">MXN · aprox. (n8n + confirmado por LLM)</div>
+    </div>
+  </div>
+
+  <div class="section-title section-gap">Ventas Confirmadas por Agente — TRG y Agrobotanix</div>
+  <div class="impact-grid">
+    <div class="impact-card span2">
+      <div class="impact-card-title">TRG — Ventas Confirmadas por Mes</div>
+      <div class="impact-rows"><div class="impact-row"><span>Febrero 2026</span><span>$6,814.57</span></div><div class="impact-row"><span>Marzo 2026</span><span>$7,630.99</span></div><div class="impact-row"><span>Abril 2026</span><span>$6,038.24</span></div><div class="impact-row"><span>Mayo 2026</span><span>$10,654.38</span></div><div class="impact-row"><span>Junio 2026</span><span>$8,863.15</span></div><div class="impact-row"><span>Julio 2026</span><span>$4,237.00</span></div><div class="impact-row"><span>Agosto 2026</span><span>$3,857.20</span></div></div>
+    </div>
+    <div class="impact-card span2">
+      <div class="impact-card-title">Agrobotanix — Ventas Confirmadas por Mes</div>
+      <div class="impact-rows"><div class="impact-row"><span>Marzo 2026</span><span>$979.00</span></div><div class="impact-row"><span>Abril 2026</span><span>$3,357.00</span></div><div class="impact-row"><span>Mayo 2026</span><span>$979.00</span></div><div class="impact-row"><span>Agosto 2026</span><span>$4,995.00</span></div></div>
+    </div>
+  </div>
+
+  <div class="section-title section-gap">Top 5 Productos — Sistema de Recordatorios</div>
+    <div class="impact-grid">
+      <div class="impact-card span2">
+        <div class="impact-card-title">Por Revenue Post-Recordatorio</div>
+        <div class="impact-rows"><div class="impact-row"><span>Auxiliar para el control de hongos, virus y bacterias</span><span>$40,852.39</span></div><div class="impact-row"><span>Auxiliar para el control de plagas</span><span>$17,770.05</span></div><div class="impact-row"><span>Enraizante para orquídeas</span><span>$12,324.50</span></div><div class="impact-row"><span>Bio-fertilizante nutritivo</span><span>$11,070.20</span></div><div class="impact-row"><span>Auxiliar para el control de gallina ciega</span><span>$9,968.00</span></div></div>
+      </div>
+    </div>
+
+</div>
+</body>
+</html>
