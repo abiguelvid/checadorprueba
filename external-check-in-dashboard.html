@@ -17,6 +17,7 @@
     }
     .page { max-width: 900px; margin: 0 auto; }
     .header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 32px; }
+    .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .brand { font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: #888; margin-bottom: 4px; }
     .title { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; color: #1a1a18; }
     .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 28px; }
@@ -37,6 +38,7 @@
     }
     .btn:hover { background: #3a3a38; }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    a.btn { text-decoration: none; display: inline-flex; align-items: center; }
     .btn-outline {
       background: #fff; color: #1a1a18; border: 1px solid #d8d6d0;
     }
@@ -87,6 +89,8 @@
     .cal-day.yellow .day-num { color: #7a5200; }
     .cal-day.red    .day-num { color: #7a2020; }
     .day-times { display: flex; flex-direction: column; align-items: center; gap: 1px; margin-top: 4px; width: 100%; }
+    .day-map { font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; color: #27500a; text-decoration: none; }
+    .day-map:hover { text-decoration: underline; }
     .day-time-in, .day-time-out {
       font-size: 9px; letter-spacing: 0.02em; width: 100%; text-align: center;
       display: flex; align-items: center; justify-content: center; gap: 3px;
@@ -95,12 +99,16 @@
     .dot-out { width: 5px; height: 5px; border-radius: 50%; background: #888; flex-shrink: 0; }
     .dot-out-missing { width: 5px; height: 5px; border-radius: 50%; background: #d88080; flex-shrink: 0; }
     .tip {
-      display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+      display: none; position: absolute; bottom: calc(100% - 2px); left: 50%; transform: translateX(-50%);
       background: #1a1a18; color: #f5f4f1; border-radius: 4px; padding: 8px 12px;
-      font-size: 11px; white-space: nowrap; z-index: 20; pointer-events: none; line-height: 1.8;
-      min-width: 160px; text-align: left;
+      font-size: 11px; white-space: normal; z-index: 20; pointer-events: auto; line-height: 1.7;
+      min-width: 180px; max-width: 240px; text-align: left;
     }
-    .cal-day:hover .tip { display: block; }
+    .tip a { color: #d5ec8a; }
+    .cal-day.show-tip .tip,
+    .cal-day:hover .tip,
+    .cal-day:focus-within .tip { display: block; }
+    .tip.tip-below { bottom: auto; top: calc(100% - 2px); }
     .export-row { display: flex; justify-content: flex-end; margin-top: 20px; gap: 8px; }
     .period-note { font-size: 10px; color: #aaa; align-self: flex-end; padding-bottom: 9px; }
   </style>
@@ -112,6 +120,10 @@
     <div>
       <div class="brand">Nanofactor · Recursos Humanos</div>
       <div class="title">Tablero de asistencia</div>
+    </div>
+    <div class="header-actions">
+      <a class="btn btn-outline" href="kiosk-check-in.html">Kiosko</a>
+      <a class="btn btn-outline" href="admin-empleados.html">Administrar empleados</a>
     </div>
   </div>
 
@@ -163,6 +175,7 @@
     <div class="leg">
       <div class="dot-out-missing" style="width:9px;height:9px;border-radius:50%;background:#d88080;flex-shrink:0"></div> Sin salida
     </div>
+    <div class="leg">mapa: enlace a Google Maps si hubo ubicación</div>
   </div>
 
   <div class="cal-header" id="calHeader"></div>
@@ -174,11 +187,8 @@
 
 </div>
 
+<script src="checador.js"></script>
 <script>
-/* ── CONFIGURACIÓN ── reemplaza con tus datos ── */
-const SUPABASE_URL = "https://pjicnaamvuluommctphb.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqaWNuYWFtdnVsdW9tbWN0cGhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0ODUwMjcsImV4cCI6MjA4ODA2MTAyN30.RevJFA0u6Ts4la2vyjgaTgtvqFWeqJTo0zrCg8wOCOY";
-
 /* ── Estado global ── */
 const now = new Date();
 let calYear  = now.getFullYear();
@@ -214,15 +224,6 @@ function setStatus(msg, type = '') {
   $('statusBar').className = 'status-bar' + (type ? ' ' + type : '');
 }
 
-/* ── Supabase helper ── */
-async function supa(path, params = '') {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}${params}`, {
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
-  });
-  if (!res.ok) throw new Error(`Supabase ${res.status}: ${await res.text()}`);
-  return res.json();
-}
-
 /* ── Init ── */
 function initPeriod() {
   const y = now.getFullYear();
@@ -236,7 +237,7 @@ async function init() {
   renderCalendarShell();
   try {
     setStatus('Cargando empleados...');
-    employees = await supa('kiosk_employees', '?select=id,name&order=name');
+    employees = await Checador.listDirectory() || [];
     const sel = $('empSelect');
     sel.innerHTML = '<option value="">— Selecciona un empleado —</option>';
     employees.forEach(e => {
@@ -275,11 +276,7 @@ async function loadData() {
   setStatus(`Cargando datos de ${empName}...`);
 
   try {
-    // Traemos AMBAS acciones en una sola query
-    const rows = await supa(
-      'kiosk_attendance',
-      `?select=action,timestamp&employee_id=eq.${empId}&timestamp=gte.${dateFrom}&timestamp=lte.${dateTo}&order=timestamp.asc`
-    );
+    const rows = await Checador.fetchAttendance(empId, dateFrom, dateTo);
 
     // Separar y procesar
     const ins  = {};   // dayKey → primer checkin del día
@@ -288,10 +285,11 @@ async function loadData() {
     rows.forEach(r => {
       const mx  = toMx(r.timestamp);
       const key = dayKey(mx);
+      const coords = Checador.readCoords(r) || {};
       if (r.action === 'checkin') {
-        if (!ins[key]) ins[key] = { mx, timeStr: fmtTime(mx), cls: classify(mx) };
+        if (!ins[key]) ins[key] = { mx, timeStr: fmtTime(mx), cls: classify(mx), ...coords };
       } else if (r.action === 'checkout') {
-        outs[key] = { mx, timeStr: fmtTime(mx) };   // sobreescribe → queda el último
+        outs[key] = { mx, timeStr: fmtTime(mx), ...coords };   // sobreescribe → queda el último
       }
     });
 
@@ -396,7 +394,7 @@ function renderCalendar() {
     cell.appendChild(num);
 
     const tip = document.createElement('div');
-    tip.className = 'tip';
+    tip.className = 'tip' + (day <= 7 ? ' tip-below' : '');
 
     const rec = dayMap[key];
 
@@ -421,17 +419,33 @@ function renderCalendar() {
         outDiv.innerHTML = `<span class="dot-out-missing"></span><span style="color:#d88080">—</span>`;
       }
       timesDiv.appendChild(outDiv);
+
+      const mapUrl = Checador.mapsUrl(rec.inRec.lat, rec.inRec.lng)
+        || (rec.outRec && Checador.mapsUrl(rec.outRec.lat, rec.outRec.lng));
+      if (mapUrl) {
+        const mapLink = document.createElement('a');
+        mapLink.className = 'day-map';
+        mapLink.href = mapUrl;
+        mapLink.target = '_blank';
+        mapLink.rel = 'noopener noreferrer';
+        mapLink.textContent = 'mapa';
+        timesDiv.appendChild(mapLink);
+      }
       cell.appendChild(timesDiv);
 
       // Tooltip
       const durStr = rec.outRec
         ? calcDur(rec.inRec.mx, rec.outRec.mx)
         : 'sin salida registrada';
-      tip.innerHTML =
-        `Entrada: <b>${rec.inRec.timeStr}</b> MX<br>` +
-        `Salida: <b>${rec.outRec ? rec.outRec.timeStr : '—'}</b> MX<br>` +
-        `${CLS_LABELS[rec.cls]}<br>` +
-        `<span style="color:#aaa;font-size:10px">${durStr}</span>`;
+      const lines = [
+        `Entrada: <b>${rec.inRec.timeStr}</b> MX`,
+        `Salida: <b>${rec.outRec ? rec.outRec.timeStr : '—'}</b> MX`,
+        CLS_LABELS[rec.cls],
+        `<span style="color:#aaa;font-size:10px">${durStr}</span>`,
+        mapAnchor('Ubicación entrada', rec.inRec),
+        rec.outRec ? mapAnchor('Ubicación salida', rec.outRec) : ''
+      ].filter(Boolean);
+      tip.innerHTML = lines.join('<br>');
 
     } else if (!isWknd && !isFuture) {
       cell.classList.add('red');
@@ -441,8 +455,29 @@ function renderCalendar() {
     }
 
     cell.appendChild(tip);
+    cell.tabIndex = 0;
+    cell.addEventListener('click', (ev) => {
+      if (ev.target.closest('a')) return;
+      const open = cell.classList.contains('show-tip');
+      document.querySelectorAll('.cal-day.show-tip').forEach(el => el.classList.remove('show-tip'));
+      if (!open) cell.classList.add('show-tip');
+    });
     grid.appendChild(cell);
   }
+}
+
+function locCells(rec) {
+  const url = rec && Checador.mapsUrl(rec.lat, rec.lng);
+  if (!url) return ['', '', '', ''];
+  const acc = rec.accuracy == null ? '' : String(Math.round(Number(rec.accuracy)));
+  return [String(rec.lat), String(rec.lng), acc, url];
+}
+
+function mapAnchor(label, rec) {
+  const url = rec && Checador.mapsUrl(rec.lat, rec.lng);
+  if (!url) return '';
+  const acc = rec.accuracy == null ? '' : ` (±${Math.round(Number(rec.accuracy))} m)`;
+  return `${label}: <a href="${Checador.escapeAttr(url)}" target="_blank" rel="noopener noreferrer">Google Maps${acc}</a>`;
 }
 
 function calcDur(mxIn, mxOut) {
@@ -468,7 +503,11 @@ function exportCSV() {
   const [ty, tm] = to.split('-').map(Number);
   const todayMx  = toMx(new Date().toISOString());
 
-  const rows = [['Fecha', 'Día', 'Hora entrada (MX)', 'Hora salida (MX)', 'Tiempo en sitio', 'Estado', 'Empleado']];
+  const rows = [[
+    'Fecha', 'Día', 'Hora entrada (MX)', 'Hora salida (MX)', 'Tiempo en sitio', 'Estado', 'Empleado',
+    'Lat entrada', 'Lng entrada', 'Precisión entrada (m)', 'Mapa entrada',
+    'Lat salida', 'Lng salida', 'Precisión salida (m)', 'Mapa salida'
+  ]];
 
   const iter = new Date(fy, fm - 1, 1);
   const end  = new Date(ty, tm, 0);
@@ -485,9 +524,13 @@ function exportCSV() {
         if (rec && rec.inRec) {
           const outStr = rec.outRec ? rec.outRec.timeStr : '—';
           const dur    = rec.outRec ? calcDur(rec.inRec.mx, rec.outRec.mx) : '—';
-          rows.push([fechaStr, DAYS_FULL[dow], rec.inRec.timeStr, outStr, dur, CLS_LABELS[rec.cls], empName]);
+          rows.push([
+            fechaStr, DAYS_FULL[dow], rec.inRec.timeStr, outStr, dur, CLS_LABELS[rec.cls], empName,
+            ...locCells(rec.inRec),
+            ...locCells(rec.outRec)
+          ]);
         } else {
-          rows.push([fechaStr, DAYS_FULL[dow], '—', '—', '—', 'Sin registro', empName]);
+          rows.push([fechaStr, DAYS_FULL[dow], '—', '—', '—', 'Sin registro', empName, '', '', '', '', '', '', '', '']);
         }
       }
     }

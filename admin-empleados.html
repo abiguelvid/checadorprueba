@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nanofactor · Empleados</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      background: #f5f4f1;
+      color: #1a1a18;
+      min-height: 100vh;
+      padding: 32px 20px 60px;
+    }
+    .page { max-width: 900px; margin: 0 auto; }
+    .header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; }
+    .brand { font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: #888; margin-bottom: 4px; }
+    .title { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; }
+    .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+    .btn {
+      padding: 8px 16px; background: #1a1a18; color: #f5f4f1; border: none;
+      border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 11px;
+      letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer;
+      transition: background 0.15s; white-space: nowrap;
+    }
+    .btn:hover { background: #3a3a38; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-outline { background: #fff; color: #1a1a18; border: 1px solid #d8d6d0; }
+    .btn-outline:hover { background: #f0eeea; border-color: #888; }
+    .btn-danger { background: #fff; color: #8c2020; border: 1px solid #e4c8c8; text-transform: none; letter-spacing: 0.04em; padding: 6px 10px; }
+    .btn-danger:hover { background: #faeaea; }
+    .card {
+      background: #fff; border: 1px solid #e8e6e0; border-radius: 6px; padding: 22px;
+    }
+    .gate { max-width: 420px; margin: 40px auto 0; }
+    .gate p, .note { color: #666; font-size: 12px; line-height: 1.6; margin: 8px 0 18px; }
+    label, .ctrl-label {
+      display: block; font-size: 10px; letter-spacing: 0.15em;
+      text-transform: uppercase; color: #888; margin-bottom: 6px;
+    }
+    input[type="password"], input[type="text"], input[type="search"] {
+      width: 100%; background: #fff; border: 1px solid #d8d6d0; border-radius: 4px;
+      font-family: 'DM Mono', monospace; font-size: 14px; color: #1a1a18;
+      padding: 10px 12px; outline: none;
+    }
+    input:focus { border-color: #888; }
+    .gate .btn { margin-top: 14px; width: 100%; }
+    .status-bar { font-size: 12px; color: #888; min-height: 18px; margin: 14px 0; }
+    .status-bar.error { color: #b03030; }
+    .status-bar.ok { color: #3a6e1a; }
+    .add-grid {
+      display: grid; grid-template-columns: 1.4fr 0.7fr auto auto; gap: 10px;
+      align-items: end; margin-bottom: 8px;
+    }
+    .toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: end; margin: 22px 0 12px; flex-wrap: wrap; }
+    .toolbar .search { width: min(320px, 100%); }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e8e6e0; border-radius: 6px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; vertical-align: middle; }
+    th { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #888; font-weight: 500; background: #faf9f6; }
+    tr:last-child td { border-bottom: none; }
+    .pin { font-variant-numeric: tabular-nums; letter-spacing: 0.12em; }
+    .empty { padding: 28px 12px; color: #888; text-align: center; }
+    @media (max-width: 720px) {
+      .add-grid { grid-template-columns: 1fr 1fr; }
+      .add-grid .span-2 { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="brand">Nanofactor · Recursos Humanos</div>
+      <div class="title">Empleados del checador</div>
+    </div>
+    <div class="header-actions">
+      <a class="btn btn-outline" href="kiosk-check-in.html">Kiosko</a>
+      <a class="btn btn-outline" href="external-check-in-dashboard.html">Tablero</a>
+    </div>
+  </div>
+
+  <section class="card gate" id="gate">
+    <label for="accessCode">Código de acceso</label>
+    <input id="accessCode" type="password" autocomplete="off" />
+    <p>Protección ligera para no dejar altas y bajas a un clic. No es una contraseña de la base. Cómo cambiarlo está en <code>README-checador.md</code>.</p>
+    <button class="btn" id="btnEnter" type="button">Entrar</button>
+    <div class="status-bar" id="gateStatus" role="status"></div>
+  </section>
+
+  <section id="app" hidden>
+    <div class="card">
+      <form id="addForm">
+        <div class="add-grid">
+          <div class="span-2">
+            <label for="empName">Nombre</label>
+            <input id="empName" type="text" maxlength="120" autocomplete="off" placeholder="Nombre y apellidos" />
+          </div>
+          <div>
+            <label for="empPin">PIN de 4 dígitos</label>
+            <input id="empPin" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000" />
+          </div>
+          <button class="btn btn-outline" id="btnPin" type="button">Generar PIN</button>
+          <button class="btn" id="btnAdd" type="submit">Agregar</button>
+        </div>
+      </form>
+      <div class="note">El PIN aleatorio no repite los que ya están en la lista. Si la base lo rechaza, elige otro.</div>
+      <div class="status-bar" id="appStatus" role="status"></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="search">
+        <label for="filter">Buscar</label>
+        <input id="filter" type="search" placeholder="Nombre" />
+      </div>
+      <button class="btn btn-outline" id="btnLogout" type="button">Cerrar sesión</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>PIN</th>
+          <th>Alta</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="empBody"></tbody>
+    </table>
+  </section>
+</div>
+
+<script src="checador.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  let accessCode = '';
+  let employees = [];
+
+  function setStatus(el, msg, type) {
+    el.textContent = msg || '';
+    el.className = 'status-bar' + (type ? ' ' + type : '');
+  }
+
+  function remember(code) {
+    try { sessionStorage.setItem('checadorAdminCode', code); } catch (_) {}
+  }
+  function stored() {
+    try { return sessionStorage.getItem('checadorAdminCode') || ''; } catch (_) { return ''; }
+  }
+  function forget() {
+    try { sessionStorage.removeItem('checadorAdminCode'); } catch (_) {}
+  }
+
+  function fmtAlta(value) {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City' });
+  }
+
+  function render() {
+    const q = Checador.normalizeName($('filter').value).toLocaleLowerCase('es');
+    const body = $('empBody');
+    body.replaceChildren();
+    const rows = employees
+      .slice()
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'))
+      .filter(row => !q || Checador.normalizeName(row.name).toLocaleLowerCase('es').includes(q));
+
+    if (!rows.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.className = 'empty';
+      td.textContent = employees.length ? 'Nadie coincide con la búsqueda.' : 'No hay empleados.';
+      tr.appendChild(td);
+      body.appendChild(tr);
+      return;
+    }
+
+    rows.forEach(row => {
+      const tr = document.createElement('tr');
+      const name = document.createElement('td');
+      name.textContent = row.name;
+      const pin = document.createElement('td');
+      pin.className = 'pin';
+      pin.textContent = Checador.padPin(row.pin) || '—';
+      const alta = document.createElement('td');
+      alta.textContent = fmtAlta(row.created_at);
+      const actions = document.createElement('td');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-danger';
+      btn.textContent = 'Borrar';
+      btn.addEventListener('click', () => removeEmployee(row));
+      actions.appendChild(btn);
+      tr.append(name, pin, alta, actions);
+      body.appendChild(tr);
+    });
+  }
+
+  async function enter(code) {
+    setStatus($('gateStatus'), 'Comprobando…');
+    $('btnEnter').disabled = true;
+    try {
+      employees = await Checador.adminList(code) || [];
+      accessCode = code;
+      remember(code);
+      $('gate').hidden = true;
+      $('app').hidden = false;
+      setStatus($('appStatus'), employees.length + ' empleados.', 'ok');
+      render();
+    } catch (err) {
+      const msg = Checador.isAdminAuthError(err) ? 'Código de acceso incorrecto.' : err.message;
+      setStatus($('gateStatus'), msg, 'error');
+    } finally {
+      $('btnEnter').disabled = false;
+    }
+  }
+
+  async function removeEmployee(row) {
+    const name = row.name || 'este empleado';
+    if (!window.confirm('¿Borrar a ' + name + '? Ya no podrá checar. Los registros de asistencia se quedan; si la base no deja borrarlo, verás el motivo.')) {
+      return;
+    }
+    setStatus($('appStatus'), 'Borrando…');
+    try {
+      await Checador.adminDelete(accessCode, row.id);
+      employees = await Checador.adminList(accessCode) || [];
+      setStatus($('appStatus'), 'Se borró a ' + name + '.', 'ok');
+      render();
+    } catch (err) {
+      setStatus($('appStatus'), err.message, 'error');
+    }
+  }
+
+  $('btnEnter').addEventListener('click', () => enter($('accessCode').value));
+  $('accessCode').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') enter($('accessCode').value);
+  });
+
+  $('btnPin').addEventListener('click', () => {
+    try {
+      const pin = Checador.generateUniquePin(employees.map(row => row.pin));
+      $('empPin').value = pin;
+      $('empPin').focus();
+      setStatus($('appStatus'), 'PIN generado: ' + pin + '. Revísalo antes de agregar.', 'ok');
+    } catch (err) {
+      setStatus($('appStatus'), err.message, 'error');
+    }
+  });
+
+  $('addForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    $('btnAdd').disabled = true;
+    setStatus($('appStatus'), 'Guardando…');
+    try {
+      const created = await Checador.adminAdd(accessCode, $('empName').value, $('empPin').value);
+      employees = await Checador.adminList(accessCode) || [];
+      $('empName').value = '';
+      $('empPin').value = '';
+      const pin = created && created.pin ? Checador.padPin(created.pin) : '';
+      setStatus($('appStatus'), 'Empleado agregado' + (pin ? ' con PIN ' + pin : '') + '.', 'ok');
+      render();
+    } catch (err) {
+      setStatus($('appStatus'), err.message, 'error');
+    } finally {
+      $('btnAdd').disabled = false;
+    }
+  });
+
+  $('empPin').addEventListener('input', () => {
+    $('empPin').value = $('empPin').value.replace(/\D/g, '').slice(0, 4);
+  });
+  $('filter').addEventListener('input', render);
+
+  $('btnLogout').addEventListener('click', () => {
+    forget();
+    accessCode = '';
+    employees = [];
+    Checador.resetClientState();
+    $('accessCode').value = '';
+    $('app').hidden = true;
+    $('gate').hidden = false;
+    setStatus($('gateStatus'), '');
+    setStatus($('appStatus'), '');
+  });
+
+  const previous = stored();
+  if (previous) {
+    $('accessCode').value = previous;
+    enter(previous);
+  }
+</script>
+</body>
+</html>

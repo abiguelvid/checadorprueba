@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registro de asistencia</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --surface: #161616;
+      --border: #2a2a2a;
+      --accent: #c8f135;
+      --accent-dim: #a0c020;
+      --text: #f0f0f0;
+      --muted: #777;
+      --red: #ff4d4d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(200,241,53,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(200,241,53,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      width: 100%;
+      max-width: 420px;
+      padding: 40px 36px 28px;
+      position: relative;
+    }
+    .card::before, .card::after {
+      content: '';
+      position: absolute;
+      width: 28px;
+      height: 28px;
+    }
+    .card::before { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+    .card::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 28px;
+    }
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.05;
+      margin-bottom: 8px;
+    }
+    .subtitle { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 28px; }
+    .clock { font-size: 32px; color: var(--accent); letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+    .date { font-size: 11px; color: var(--muted); letter-spacing: 0.14em; text-transform: uppercase; margin: 4px 0 28px; }
+    .state { display: none; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 18px; }
+    .state.visible { display: flex; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+    .dot.in { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .dot.out { background: var(--red); }
+    label { display: block; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 24px;
+      letter-spacing: 0.4em;
+      text-align: center;
+      padding: 14px 16px;
+      margin-bottom: 22px;
+      outline: none;
+    }
+    input:focus { border-color: var(--accent); }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    button {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 14px 10px;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .in { background: var(--accent); color: #111; border: 1px solid var(--accent); }
+    .out { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    .clear {
+      width: 100%;
+      margin-top: 8px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      letter-spacing: 0.16em;
+    }
+    .status { display: none; margin-top: 16px; padding: 12px 14px; border: 1px solid var(--border); font-size: 12px; line-height: 1.5; }
+    .status.show { display: block; }
+    .status.ok { border-color: rgba(200,241,53,0.45); color: var(--accent); }
+    .status.err { border-color: rgba(255,77,77,0.45); color: var(--red); }
+    .status strong { display: block; font-family: 'Syne', sans-serif; font-size: 15px; margin-bottom: 2px; }
+    .foot { margin-top: 22px; font-size: 11px; color: #555; display: flex; gap: 14px; }
+    .foot a { color: #888; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Nanofactor · Asistencia</div>
+    <h1>Registro<br>de entrada</h1>
+    <p class="subtitle">Ingresa tu PIN. Se intenta guardar la ubicación; si la niegas o falla, la entrada o la salida se registran igual.</p>
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="date" id="dateLine"></div>
+    <div class="state" id="state">
+      <span class="dot" id="dot"></span>
+      <span id="stateText"></span>
+    </div>
+    <label for="pin">Tu PIN</label>
+    <input id="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="····" />
+    <div class="actions">
+      <button class="in" id="btnIn" type="button">Entrada</button>
+      <button class="out" id="btnOut" type="button">Salida</button>
+    </div>
+    <button class="clear" id="btnClear" type="button">Limpiar PIN</button>
+    <div class="status" id="status" role="status"></div>
+    <div class="foot">
+      <a href="external-check-in-dashboard.html">Tablero</a>
+      <a href="admin-empleados.html">Admin</a>
+    </div>
+  </div>
+
+<script src="checador.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  let busy = false;
+  let watch = 0;
+
+  function tick() {
+    const now = new Date();
+    const time = new Intl.DateTimeFormat('es-MX', {
+      timeZone: 'America/Mexico_City',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23'
+    }).format(now);
+    const date = new Intl.DateTimeFormat('es-MX', {
+      timeZone: 'America/Mexico_City',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    }).format(now);
+    $('clock').textContent = time;
+    $('dateLine').textContent = date.toUpperCase();
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  function showStatus(kind, title, detail) {
+    const box = $('status');
+    box.className = 'status show ' + (kind === 'ok' ? 'ok' : kind === 'err' ? 'err' : '');
+    box.replaceChildren();
+    if (title) {
+      const strong = document.createElement('strong');
+      strong.textContent = title;
+      box.appendChild(strong);
+    }
+    box.appendChild(document.createTextNode(detail || ''));
+  }
+  function clearStatus() {
+    $('status').className = 'status';
+    $('status').replaceChildren();
+  }
+  function hideState() {
+    $('state').classList.remove('visible');
+  }
+  function showState(isIn, name) {
+    $('state').classList.add('visible');
+    $('dot').className = 'dot ' + (isIn ? 'in' : 'out');
+    $('stateText').textContent = name + (isIn ? ' · actualmente dentro' : ' · fuera');
+  }
+  function setBusy(on) {
+    busy = on;
+    $('btnIn').disabled = on;
+    $('btnOut').disabled = on;
+  }
+
+  async function refreshState(pin) {
+    const token = ++watch;
+    if (pin.length !== 4) { hideState(); return; }
+    try {
+      const found = await Checador.verifyPin(pin);
+      if (token !== watch) return;
+      if (!found) { hideState(); return; }
+      showState(!!found.is_checked_in, found.name);
+    } catch (_) {
+      if (token === watch) hideState();
+    }
+  }
+
+  $('pin').addEventListener('input', () => {
+    $('pin').value = $('pin').value.replace(/\D/g, '').slice(0, 4);
+    clearStatus();
+    refreshState($('pin').value.trim());
+  });
+
+  $('btnClear').addEventListener('click', () => {
+    $('pin').value = '';
+    hideState();
+    clearStatus();
+    $('pin').focus();
+  });
+
+  async function punch(action) {
+    if (busy) return;
+    const pin = $('pin').value.trim();
+    if (!/^[0-9]{4}$/.test(pin)) {
+      showStatus('err', '', 'Ingresa un PIN de 4 dígitos');
+      return;
+    }
+    setBusy(true);
+    showStatus('', '', 'Buscando ubicación… si no hay permiso, se guarda igual');
+    const location = await Checador.readLocation();
+    try {
+      const row = await Checador.registerAttendance({ pin, action, location });
+      const when = new Date(row.marked_at);
+      const time = Number.isNaN(when.getTime())
+        ? ''
+        : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' });
+      const verb = action === 'checkin' ? 'Entrada registrada' : 'Salida registrada';
+      const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
+      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where);
+      $('pin').value = '';
+      hideState();
+    } catch (err) {
+      showStatus('err', '', err.message || 'No se pudo registrar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  $('btnIn').addEventListener('click', () => punch('checkin'));
+  $('btnOut').addEventListener('click', () => punch('checkout'));
+  $('pin').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') punch('checkin');
+  });
+  $('pin').focus();
+</script>
+</body>
+</html>
