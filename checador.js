@@ -12,6 +12,7 @@
   const SUPABASE_URL = 'https://pjicnaamvuluommctphb.supabase.co';
   const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqaWNuYWFtdnVsdW9tbWN0cGhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0ODUwMjcsImV4cCI6MjA4ODA2MTAyN30.RevJFA0u6Ts4la2vyjgaTgtvqFWeqJTo0zrCg8wOCOY';
   const ADMIN_ACCESS_CODE_FALLBACK = 'nfg-rh';
+  const DUPLICATE_WINDOW_MS = 60 * 1000;
 
   const state = {
     adminMode: null,
@@ -212,6 +213,67 @@
     return request('kiosk_employees?select=id,name&order=name.asc');
   }
 
+  function cdmxDayBounds(ymd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(ymd || ''))) {
+      throw new Error('Fecha inválida');
+    }
+    const from = new Date(ymd + 'T00:00:00.000-06:00');
+    const to = new Date(ymd + 'T23:59:59.999-06:00');
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      throw new Error('Fecha inválida');
+    }
+    return { from: from.toISOString(), to: to.toISOString() };
+  }
+
+  function formatCdmx(iso) {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '—';
+    return new Intl.DateTimeFormat('es-MX', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).format(date);
+  }
+
+  function actionLabel(action) {
+    if (action === 'checkin') return 'Entrada';
+    if (action === 'checkout') return 'Salida';
+    return action || '—';
+  }
+
+  function todayCdmx() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+  }
+
+  async function listRecords(employeeId, ymd) {
+    const bounds = cdmxDayBounds(ymd);
+    let filter = 'select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy'
+      + '&timestamp=gte.' + encodeURIComponent(bounds.from)
+      + '&timestamp=lte.' + encodeURIComponent(bounds.to)
+      + '&order=timestamp.desc&limit=500';
+    if (employeeId) {
+      assertId(employeeId);
+      filter += '&employee_id=eq.' + employeeId;
+    }
+    const path = 'kiosk_attendance?' + filter;
+    try {
+      return await request(path) || [];
+    } catch (err) {
+      if (!isMissingLocationColumn(err)) throw err;
+      const plain = path.replace('lat,lng,accuracy', '').replace('select=id,employee_id,employee_name,action,timestamp,', 'select=id,employee_id,employee_name,action,timestamp');
+      return await request(plain) || [];
+    }
+  }
+
   async function fetchAttendance(empId, dateFrom, dateTo) {
     assertId(empId);
     const filter = 'employee_id=eq.' + empId
@@ -284,12 +346,39 @@
     };
   }
 
+  function duplicateMessage(action) {
+    return action === 'checkin'
+      ? 'Esta entrada ya se registró hace un momento. Espera un minuto para no duplicarla.'
+      : 'Esta salida ya se registró hace un momento. Espera un minuto para no duplicarla.';
+  }
+
+  async function assertFresh(employeeId, action) {
+    assertId(employeeId);
+    let rows;
+    try {
+      rows = await request(
+        'kiosk_attendance?select=action,timestamp&employee_id=eq.' + employeeId + '&order=timestamp.desc&limit=1'
+      );
+    } catch (_) {
+      return;
+    }
+    const last = rows && rows[0];
+    if (!last || last.action !== action || !last.timestamp) return;
+    const age = Date.now() - new Date(last.timestamp).getTime();
+    if (Number.isFinite(age) && age >= 0 && age < DUPLICATE_WINDOW_MS) {
+      throw new Error(duplicateMessage(action));
+    }
+  }
+
   async function registerAttendance(input) {
     const cleanPin = String(input && input.pin || '').trim();
     const action = input && input.action;
     if (!isValidPin(cleanPin)) throw new Error('Ingresa un PIN de 4 dígitos');
     if (action !== 'checkin' && action !== 'checkout') throw new Error('Acción no válida');
     const loc = sanitizeLocation(input.location);
+    const emp = await verifyPin(cleanPin);
+    if (!emp) throw new Error('PIN no encontrado');
+    await assertFresh(emp.id, action);
 
     if (state.registerMode !== 'direct') {
       try {
@@ -309,8 +398,6 @@
       }
     }
 
-    const emp = await verifyPin(cleanPin);
-    if (!emp) throw new Error('PIN no encontrado');
     const base = {
       employee_id: emp.id,
       employee_name: emp.name,
@@ -449,8 +536,23 @@
     }
   }
 
+  async function employeeHasHistory(id) {
+    assertId(id);
+    try {
+      const rows = await request('kiosk_attendance?select=id&employee_id=eq.' + id + '&limit=1');
+      return !!(rows && rows.length);
+    } catch (err) {
+      const blocked = new Error('No quité a esta persona porque no pude confirmar si tiene asistencia. No se borró nada.');
+      blocked.cause = err;
+      throw blocked;
+    }
+  }
+
   async function adminDelete(code, id) {
     assertId(id);
+    if (await employeeHasHistory(id)) {
+      throw new Error('No se quitó: esta persona ya tiene asistencia. Borrar la ficha podría eliminar ese historial y no se cambia el esquema. La ficha se queda.');
+    }
     if (state.adminMode !== 'direct') {
       try {
         await rpc('admin_delete_employee', { p_code: String(code || ''), p_id: id });
@@ -482,6 +584,7 @@
   return {
     SUPABASE_URL,
     ADMIN_ACCESS_CODE_FALLBACK,
+    DUPLICATE_WINDOW_MS,
     resetClientState,
     normalizeName,
     isValidPin,
@@ -495,6 +598,11 @@
     isAdminAuthError,
     isPinForbidden,
     listDirectory,
+    cdmxDayBounds,
+    formatCdmx,
+    actionLabel,
+    todayCdmx,
+    listRecords,
     fetchAttendance,
     verifyPin,
     registerAttendance,

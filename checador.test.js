@@ -69,9 +69,8 @@ test('los 19 nombres normalizados coinciden en SQL y README', () => {
   });
 
   const fromSql = seedPairs(read('sql/02_seed_empleados.sql'));
-  const fromReadme = readmePairs(read('README-checador.md'));
   assert.deepEqual(fromSql.map(pair => pair[0]), expected);
-  assert.deepEqual(fromReadme, fromSql);
+  assert.equal(readmePairs(read('README-checador.md')).length, 0);
 
   const pins = fromSql.map(pair => pair[1]);
   assert.equal(new Set(pins).size, 19);
@@ -79,7 +78,19 @@ test('los 19 nombres normalizados coinciden en SQL y README', () => {
   pins.forEach(pin => {
     assert.match(pin, /^[1-9][0-9]{3}$/);
   });
-  assert.match(read('sql/02_seed_empleados.sql'), /5293/);
+  const published = [
+    'kiosk-check-in.html',
+    'admin-empleados.html',
+    'external-check-in-dashboard.html',
+    'checador.js',
+    'README-checador.md'
+  ];
+  published.forEach(file => {
+    const text = read(file);
+    pins.forEach(pin => {
+      assert.equal(text.includes(pin), false, file + ' publica un PIN del seed');
+    });
+  });
   assert.equal(Checador.ADMIN_ACCESS_CODE_FALLBACK, 'nfg-rh');
   assert.match(read('sql/03_seguridad_pin_y_admin.sql'), /'nfg-rh'/);
   assert.match(read('checador.js'), /ADMIN_ACCESS_CODE_FALLBACK = 'nfg-rh'/);
@@ -194,6 +205,10 @@ test('si faltan columnas de ubicación, reintenta el insert sin ellas', async ()
 test('con la función nueva manda la ubicación y no inserta directo', async () => {
   Checador.resetClientState();
   global.fetch = async (url, options) => {
+    if (url.endsWith('/rpc/verify_pin')) {
+      return jsonResponse(200, [{ id: '55555555-5555-5555-5555-555555555555', name: 'PAULINA CÓRDOVA WALTERSPIEL', is_checked_in: false }]);
+    }
+    if (url.includes('select=action,timestamp')) return jsonResponse(200, []);
     assert.match(url, /\/rpc\/register_attendance$/);
     const body = JSON.parse(options.body);
     assert.deepEqual(body, {
@@ -273,6 +288,7 @@ test('antes de la migración nfg-rh lista, agrega y borra directo', async () => 
     if (options.method === 'DELETE') {
       return jsonResponse(200, [{ id: '33333333-3333-3333-3333-333333333333' }]);
     }
+    if (url.includes('kiosk_attendance?select=id&')) return jsonResponse(200, []);
     return jsonResponse(200, [{ id: '33333333-3333-3333-3333-333333333333', name: 'Erick Torres', pin: '5293' }]);
   };
 
@@ -310,4 +326,111 @@ test('con las funciones, la admin manda el código y no lee pin directo', async 
   await Checador.adminAdd('codigo-real', 'NUEVA PERSONA', '4444');
   assert.equal(calls.every(call => call.url.includes('/rpc/')), true);
   assert.equal(calls.some(call => call.body.p_code === 'codigo-real'), true);
+});
+
+test('no repite la misma acción dentro de un minuto', async () => {
+  Checador.resetClientState();
+  const posts = [];
+  global.fetch = async (url, options) => {
+    if (url.endsWith('/rpc/verify_pin') || url.endsWith('/rpc/register_attendance')) {
+      return jsonResponse(404, { code: 'PGRST202', message: 'Could not find the function public.verify_pin in the schema cache' });
+    }
+    if (url.includes('kiosk_employees?select=id,name&pin=eq.')) {
+      return jsonResponse(200, [{ id: '11111111-1111-1111-1111-111111111111', name: 'Persona' }]);
+    }
+    if (url.includes('select=action,timestamp') || url.includes('select=action&')) {
+      return jsonResponse(200, [{ action: 'checkin', timestamp: new Date().toISOString() }]);
+    }
+    if (options.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return jsonResponse(201, [{ employee_name: 'Persona', action: 'checkin', timestamp: new Date().toISOString() }]);
+    }
+    return jsonResponse(500, { message: url });
+  };
+
+  await assert.rejects(
+    () => Checador.registerAttendance({ pin: '2465', action: 'checkin', location: { lat: 19.4, lng: -99.1, accuracy: 10 } }),
+    /hace un momento/
+  );
+  assert.equal(posts.length, 0);
+
+  global.fetch = async (url, options) => {
+    if (url.endsWith('/rpc/verify_pin') || url.endsWith('/rpc/register_attendance')) {
+      return jsonResponse(404, { code: 'PGRST202', message: 'Could not find the function public.register_attendance in the schema cache' });
+    }
+    if (url.includes('kiosk_employees?select=id,name&pin=eq.')) {
+      return jsonResponse(200, [{ id: '11111111-1111-1111-1111-111111111111', name: 'Persona' }]);
+    }
+    if (url.includes('select=action,timestamp') || url.includes('select=action&')) {
+      return jsonResponse(200, [{ action: 'checkin', timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString() }]);
+    }
+    if (options.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return jsonResponse(201, [{
+        employee_name: 'Persona',
+        action: 'checkout',
+        timestamp: new Date().toISOString(),
+        lat: 19.4,
+        lng: -99.1,
+        accuracy: 10
+      }]);
+    }
+    return jsonResponse(500, { message: url });
+  };
+  const row = await Checador.registerAttendance({
+    pin: '2465',
+    action: 'checkout',
+    location: { lat: 19.4, lng: -99.1, accuracy: 10 }
+  });
+  assert.equal(row.action, 'checkout');
+  assert.equal(row.saved_location, true);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].lat, 19.4);
+});
+
+test('quitar colaborador no borra la ficha si ya hay asistencia', async () => {
+  Checador.resetClientState();
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, method: options.method || 'GET' });
+    if (url.includes('/rpc/')) {
+      return jsonResponse(404, { code: 'PGRST202', message: 'Could not find the function public.admin_delete_employee' });
+    }
+    if (url.includes('kiosk_attendance?select=id&')) {
+      return jsonResponse(200, [{ id: '99999999-9999-9999-9999-999999999999' }]);
+    }
+    if (options.method === 'DELETE') return jsonResponse(200, [{ id: '33333333-3333-3333-3333-333333333333' }]);
+    return jsonResponse(200, []);
+  };
+  await assert.rejects(
+    () => Checador.adminDelete('nfg-rh', '33333333-3333-3333-3333-333333333333'),
+    /ya tiene asistencia/
+  );
+  assert.equal(calls.some(call => call.method === 'DELETE'), false);
+});
+
+test('el día de CDMX y el listado de registros piden la ubicación', async () => {
+  const bounds = Checador.cdmxDayBounds('2026-11-03');
+  assert.equal(bounds.from, '2026-11-03T06:00:00.000Z');
+  assert.equal(bounds.to, '2026-11-04T05:59:59.999Z');
+  assert.equal(Checador.actionLabel('checkin'), 'Entrada');
+  assert.match(Checador.formatCdmx('2026-11-03T15:10:00Z'), /09:10/);
+
+  let seen = '';
+  global.fetch = async (url) => {
+    seen = url;
+    return jsonResponse(200, [{
+      employee_name: 'Persona',
+      action: 'checkin',
+      timestamp: '2026-11-03T15:10:00Z',
+      lat: null,
+      lng: null
+    }]);
+  };
+  const id = '22222222-2222-2222-2222-222222222222';
+  const rows = await Checador.listRecords(id, '2026-11-03');
+  assert.equal(rows[0].lat, null);
+  assert.match(seen, /select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy/);
+  assert.match(seen, new RegExp('employee_id=eq.' + id));
+  assert.equal(Checador.mapsUrl(rows[0].lat, rows[0].lng), null);
 });

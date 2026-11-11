@@ -156,6 +156,15 @@ BEGIN
     RAISE EXCEPTION 'PIN no encontrado';
   END IF;
 
+  IF EXISTS (
+    SELECT 1 FROM public.kiosk_attendance a
+    WHERE a.employee_id = v_id
+      AND a.action = v_action
+      AND a."timestamp" > now() - interval '60 seconds'
+  ) THEN
+    RAISE EXCEPTION 'Esta acción ya se registró hace un momento. Espera un minuto para no duplicarla.';
+  END IF;
+
   v_lat := NULL;
   v_lng := NULL;
   v_acc := NULL;
@@ -317,6 +326,12 @@ BEGIN
   END IF;
   IF p_id IS NULL THEN
     RAISE EXCEPTION 'Empleado no encontrado';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.kiosk_attendance a WHERE a.employee_id = p_id
+  ) THEN
+    RAISE EXCEPTION 'No se quitó: esta persona ya tiene asistencia. Borrar la ficha podría eliminar ese historial y no se cambia el esquema. La ficha se queda.';
   END IF;
 
   BEGIN

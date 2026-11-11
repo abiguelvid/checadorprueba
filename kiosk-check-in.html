@@ -126,7 +126,7 @@
   <div class="card">
     <div class="logo">Nanofactor · Asistencia</div>
     <h1>Registro<br>de entrada</h1>
-    <p class="subtitle">Ingresa tu PIN. Se intenta guardar la ubicación; si la niegas o falla, la entrada o la salida se registran igual.</p>
+    <p class="subtitle">Ingresa tu PIN. El navegador pide la ubicación; si la niegas o falla, la entrada o la salida se registran igual. La misma acción no se vuelve a guardar durante un minuto.</p>
     <div class="clock" id="clock">--:--:--</div>
     <div class="date" id="dateLine"></div>
     <div class="state" id="state">
@@ -237,6 +237,7 @@
       showStatus('err', '', 'Ingresa un PIN de 4 dígitos');
       return;
     }
+    busy = true;
     setBusy(true);
     showStatus('', '', 'Buscando ubicación… si no hay permiso, se guarda igual');
     const location = await Checador.readLocation();
@@ -245,7 +246,7 @@
       const when = new Date(row.marked_at);
       const time = Number.isNaN(when.getTime())
         ? ''
-        : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' });
+        : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
       const verb = action === 'checkin' ? 'Entrada registrada' : 'Salida registrada';
       const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
       showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where);
@@ -264,6 +265,7 @@
     if (ev.key === 'Enter') punch('checkin');
   });
   $('pin').focus();
+  Checador.readLocation();
 </script>
 </body>
 </html>

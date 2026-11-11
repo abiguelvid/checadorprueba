@@ -15,7 +15,9 @@
       min-height: 100vh;
       padding: 32px 20px 60px;
     }
-    .page { max-width: 900px; margin: 0 auto; }
+    .page { max-width: 980px; margin: 0 auto; }
+    h2 { font-family: 'Syne', sans-serif; font-size: 18px; margin-bottom: 14px; }
+    .section { margin-bottom: 28px; }
     .header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; }
     .brand { font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: #888; margin-bottom: 4px; }
     .title { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; }
@@ -42,7 +44,7 @@
       display: block; font-size: 10px; letter-spacing: 0.15em;
       text-transform: uppercase; color: #888; margin-bottom: 6px;
     }
-    input[type="password"], input[type="text"], input[type="search"] {
+    input[type="password"], input[type="text"], input[type="search"], input[type="date"], select {
       width: 100%; background: #fff; border: 1px solid #d8d6d0; border-radius: 4px;
       font-family: 'DM Mono', monospace; font-size: 14px; color: #1a1a18;
       padding: 10px 12px; outline: none;
@@ -64,9 +66,14 @@
     tr:last-child td { border-bottom: none; }
     .pin { font-variant-numeric: tabular-nums; letter-spacing: 0.12em; }
     .empty { padding: 28px 12px; color: #888; text-align: center; }
+    .filters { display: grid; grid-template-columns: 1.4fr 0.7fr auto; gap: 10px; align-items: end; }
+    .map-link { color: #27500a; }
+    .sin-ubicacion { color: #8c2020; }
+    .table-wrap { overflow-x: auto; }
     @media (max-width: 720px) {
       .add-grid { grid-template-columns: 1fr 1fr; }
       .add-grid .span-2 { grid-column: 1 / -1; }
+      .filters { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -92,7 +99,36 @@
   </section>
 
   <section id="app" hidden>
-    <div class="card">
+    <div class="card section">
+      <h2>Registros</h2>
+      <div class="filters">
+        <div>
+          <label for="recEmp">Empleado</label>
+          <select id="recEmp"></select>
+        </div>
+        <div>
+          <label for="recDate">Fecha (CDMX)</label>
+          <input id="recDate" type="date" />
+        </div>
+        <button class="btn" id="recLoad" type="button">Ver</button>
+      </div>
+      <div class="status-bar" id="recStatus" role="status"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha y hora</th>
+              <th>Empleado</th>
+              <th>Acción</th>
+              <th>Ubicación</th>
+            </tr>
+          </thead>
+          <tbody id="recBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section">
       <form id="addForm">
         <div class="add-grid">
           <div class="span-2">
@@ -154,6 +190,85 @@
     try { sessionStorage.removeItem('checadorAdminCode'); } catch (_) {}
   }
 
+  function fillRecordEmployees() {
+    const sel = $('recEmp');
+    const current = sel.value;
+    sel.replaceChildren();
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = 'Todos';
+    sel.appendChild(all);
+    employees
+      .slice()
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'))
+      .forEach(row => {
+        const opt = document.createElement('option');
+        opt.value = row.id;
+        opt.textContent = row.name;
+        sel.appendChild(opt);
+      });
+    if (current && employees.some(row => row.id === current)) sel.value = current;
+  }
+
+  function renderRecords(rows) {
+    const body = $('recBody');
+    body.replaceChildren();
+    if (!rows.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.className = 'empty';
+      td.textContent = 'No hay registros en esa fecha.';
+      tr.appendChild(td);
+      body.appendChild(tr);
+      return;
+    }
+    rows.forEach(row => {
+      const tr = document.createElement('tr');
+      const when = document.createElement('td');
+      when.textContent = Checador.formatCdmx(row.timestamp);
+      const who = document.createElement('td');
+      who.textContent = row.employee_name || '—';
+      const action = document.createElement('td');
+      action.textContent = Checador.actionLabel(row.action);
+      const where = document.createElement('td');
+      const coords = Checador.readCoords(row);
+      const url = coords && Checador.mapsUrl(coords.lat, coords.lng);
+      if (url) {
+        const link = document.createElement('a');
+        link.className = 'map-link';
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const acc = coords.accuracy == null ? '' : ' (±' + Math.round(coords.accuracy) + ' m)';
+        link.textContent = 'Google Maps' + acc;
+        where.appendChild(link);
+      } else {
+        const span = document.createElement('span');
+        span.className = 'sin-ubicacion';
+        span.textContent = 'sin ubicación';
+        where.appendChild(span);
+      }
+      tr.append(when, who, action, where);
+      body.appendChild(tr);
+    });
+  }
+
+  async function loadRecords() {
+    setStatus($('recStatus'), 'Cargando registros…');
+    $('recLoad').disabled = true;
+    try {
+      const rows = await Checador.listRecords($('recEmp').value, $('recDate').value);
+      renderRecords(rows);
+      const extra = rows.length === 500 ? ' Se muestran los 500 más recientes.' : '';
+      setStatus($('recStatus'), rows.length + ' registros.' + extra, 'ok');
+    } catch (err) {
+      setStatus($('recStatus'), err.message, 'error');
+    } finally {
+      $('recLoad').disabled = false;
+    }
+  }
+
   function fmtAlta(value) {
     if (!value) return '—';
     const d = new Date(value);
@@ -213,6 +328,8 @@
       $('app').hidden = false;
       setStatus($('appStatus'), employees.length + ' empleados.', 'ok');
       render();
+      fillRecordEmployees();
+      loadRecords();
     } catch (err) {
       const msg = Checador.isAdminAuthError(err) ? 'Código de acceso incorrecto.' : err.message;
       setStatus($('gateStatus'), msg, 'error');
@@ -223,15 +340,16 @@
 
   async function removeEmployee(row) {
     const name = row.name || 'este empleado';
-    if (!window.confirm('¿Borrar a ' + name + '? Ya no podrá checar. Los registros de asistencia se quedan; si la base no deja borrarlo, verás el motivo.')) {
+    if (!window.confirm('¿Quitar a ' + name + ' del checador?\n\nSi ya tiene asistencia, no se quita: borrar la ficha podría llevarse ese historial y no vamos a cambiar la base. Si todavía no tiene registros, solo se quita la ficha.')) {
       return;
     }
     setStatus($('appStatus'), 'Borrando…');
     try {
       await Checador.adminDelete(accessCode, row.id);
       employees = await Checador.adminList(accessCode) || [];
-      setStatus($('appStatus'), 'Se borró a ' + name + '.', 'ok');
+      setStatus($('appStatus'), 'Se quitó a ' + name + '. No tenía asistencia, así que el historial no cambió.', 'ok');
       render();
+      fillRecordEmployees();
     } catch (err) {
       setStatus($('appStatus'), err.message, 'error');
     }
@@ -265,6 +383,7 @@
       const pin = created && created.pin ? Checador.padPin(created.pin) : '';
       setStatus($('appStatus'), 'Empleado agregado' + (pin ? ' con PIN ' + pin : '') + '.', 'ok');
       render();
+      fillRecordEmployees();
     } catch (err) {
       setStatus($('appStatus'), err.message, 'error');
     } finally {
@@ -276,6 +395,8 @@
     $('empPin').value = $('empPin').value.replace(/\D/g, '').slice(0, 4);
   });
   $('filter').addEventListener('input', render);
+  $('recLoad').addEventListener('click', loadRecords);
+  $('recDate').value = Checador.todayCdmx();
 
   $('btnLogout').addEventListener('click', () => {
     forget();
