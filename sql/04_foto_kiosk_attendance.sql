@@ -7,8 +7,9 @@
 --
 -- Orden:
 --   1. sql/01 y sql/02 ya están aplicados. No los vuelvas a correr.
---   2. Corre ESTE archivo (04) antes de publicar el kiosco nuevo.
---      Sin la columna y el bucket, el kiosco se niega a registrar.
+--   2. Corre ESTE archivo y después sql/06_bitacora_auditoria.sql
+--      antes de publicar el kiosco nuevo. El 04 crea la foto; el 06
+--      crea la huella y la bitácora. Sin photo_sha256 el registro no se guarda.
 --   3. sql/05_retencion_fotos_asistencia.sql es opcional: solo crea
 --      funciones y no borra nada. No lo programes con cron.
 --   4. sql/03 sigue siendo el cierre de PIN, para más adelante.
@@ -155,6 +156,8 @@ $policy$;
 
 -- Misma función que sql/03. Así el 04 sirve aunque el paso 3 no se haya corrido.
 DROP FUNCTION IF EXISTS public.register_attendance(text, text, double precision, double precision, double precision);
+DROP FUNCTION IF EXISTS public.register_attendance(text, text, double precision, double precision, double precision, text);
+DROP FUNCTION IF EXISTS public.register_attendance(text, text, double precision, double precision, double precision, text, text);
 
 CREATE OR REPLACE FUNCTION public.register_attendance(
   p_pin text,
@@ -162,7 +165,8 @@ CREATE OR REPLACE FUNCTION public.register_attendance(
   p_lat double precision DEFAULT NULL,
   p_lng double precision DEFAULT NULL,
   p_accuracy double precision DEFAULT NULL,
-  p_photo_path text DEFAULT NULL
+  p_photo_path text DEFAULT NULL,
+  p_photo_sha256 text DEFAULT NULL
 )
 RETURNS TABLE (
   employee_id uuid,
@@ -184,7 +188,9 @@ DECLARE
   v_acc double precision;
   v_has_loc boolean;
   v_has_photo boolean;
+  v_has_sha boolean;
   v_photo text;
+  v_sha text;
   v_ts timestamptz;
   v_saved boolean := false;
 BEGIN
@@ -213,6 +219,11 @@ BEGIN
   END IF;
   IF split_part(v_photo, '/', 1) IS DISTINCT FROM v_id::text THEN
     RAISE EXCEPTION 'La foto no corresponde al empleado. No se registró la asistencia.';
+  END IF;
+
+  v_sha := lower(btrim(coalesce(p_photo_sha256, '')));
+  IF v_sha !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'Falta la huella de la foto. No se registró la asistencia.';
   END IF;
 
   IF EXISTS (
@@ -262,27 +273,36 @@ BEGIN
     RAISE EXCEPTION 'Falta la columna photo_path. Corre sql/04_foto_kiosk_attendance.sql. No se registró la asistencia.';
   END IF;
 
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'kiosk_attendance' AND column_name = 'photo_sha256'
+  ) INTO v_has_sha;
+
+  IF NOT v_has_sha THEN
+    RAISE EXCEPTION 'Falta la columna photo_sha256. Corre sql/06_bitacora_auditoria.sql. No se registró la asistencia.';
+  END IF;
+
   IF v_has_loc THEN
     EXECUTE $q$
       INSERT INTO public.kiosk_attendance
-        (employee_id, employee_name, action, "timestamp", lat, lng, accuracy, photo_path)
-      VALUES ($1, $2, $3, now(), $4, $5, $6, $7)
+        (employee_id, employee_name, action, "timestamp", lat, lng, accuracy, photo_path, photo_sha256)
+      VALUES ($1, $2, $3, now(), $4, $5, $6, $7, $8)
       RETURNING "timestamp"
     $q$
     INTO v_ts
-    USING v_id, v_name, v_action, v_lat, v_lng, v_acc, v_photo;
+    USING v_id, v_name, v_action, v_lat, v_lng, v_acc, v_photo, v_sha;
     IF v_lat IS NULL OR v_lng IS NULL THEN
       v_saved := false;
     END IF;
   ELSE
     EXECUTE $q$
       INSERT INTO public.kiosk_attendance
-        (employee_id, employee_name, action, "timestamp", photo_path)
-      VALUES ($1, $2, $3, now(), $4)
+        (employee_id, employee_name, action, "timestamp", photo_path, photo_sha256)
+      VALUES ($1, $2, $3, now(), $4, $5)
       RETURNING "timestamp"
     $q$
     INTO v_ts
-    USING v_id, v_name, v_action, v_photo;
+    USING v_id, v_name, v_action, v_photo, v_sha;
     v_saved := false;
   END IF;
 
@@ -291,13 +311,13 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text) TO anon, authenticated;
+REVOKE ALL ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text, text) TO anon, authenticated;
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text) TO service_role';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text, text) TO service_role';
   END IF;
 END $$;
 

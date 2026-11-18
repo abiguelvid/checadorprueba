@@ -136,7 +136,7 @@
     return missing && /\b(lat|lng|accuracy)\b/i.test(blob);
   }
 
-  function isMissingPhotoColumn(err) {
+  function isMissingNamedColumn(err, column) {
     const blob = errText(err);
     const missing = err.code === 'PGRST204'
       || err.code === '42703'
@@ -144,11 +144,28 @@
       || /42703/.test(blob)
       || /schema cache/i.test(blob)
       || /does not exist/i.test(blob);
-    return missing && /\bphoto_path\b/i.test(blob);
+    return missing && new RegExp('\\b' + column + '\\b', 'i').test(blob);
+  }
+
+  function isMissingPhotoColumn(err) {
+    return isMissingNamedColumn(err, 'photo_path');
+  }
+
+  function isMissingPhotoHashColumn(err) {
+    return isMissingNamedColumn(err, 'photo_sha256');
   }
 
   function photoColumnError() {
     return new Error('Falta la columna de la foto. Corre sql/04_foto_kiosk_attendance.sql en Supabase. No se registró la asistencia.');
+  }
+
+  function photoHashColumnError() {
+    return new Error('Falta la columna de la huella. Corre sql/06_bitacora_auditoria.sql en Supabase. No se registró la asistencia.');
+  }
+
+  function throwIfPhotoSchema(err) {
+    if (isMissingPhotoHashColumn(err)) throw photoHashColumnError();
+    if (isMissingPhotoColumn(err)) throw photoColumnError();
   }
 
   function isAdminAuthError(err) {
@@ -170,6 +187,56 @@
 
   function isPhotoPath(value) {
     return PHOTO_PATH_RE.test(String(value || ''));
+  }
+
+  function isPhotoSha256(value) {
+    return /^[0-9a-f]{64}$/.test(String(value || ''));
+  }
+
+  async function sha256Hex(data) {
+    let buffer;
+    if (data instanceof ArrayBuffer) buffer = data;
+    else if (ArrayBuffer.isView(data)) {
+      buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    } else if (data && typeof data.arrayBuffer === 'function') {
+      buffer = await data.arrayBuffer();
+    } else {
+      throw new Error('No se pudo calcular la huella de la foto. No se registró la asistencia.');
+    }
+    if (!crypto || !crypto.subtle || typeof crypto.subtle.digest !== 'function') {
+      throw new Error('Este navegador no puede calcular la huella de la foto. No se registró la asistencia.');
+    }
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest), function (b) {
+      return b.toString(16).padStart(2, '0');
+    }).join('');
+  }
+
+  function auditActionLabel(action) {
+    if (action === 'INSERT') return 'Alta';
+    if (action === 'UPDATE') return 'Cambio';
+    if (action === 'DELETE') return 'Baja';
+    if (action === 'BASELINE') return 'Registro inicial';
+    return action || '—';
+  }
+
+  function auditActorLabel(row) {
+    const src = row || {};
+    const role = src.actor_role || src.db_role || 'desconocido';
+    if (src.actor_uid) return role + ' · ' + src.actor_uid;
+    if (src.db_role && src.db_role !== role) return role + ' · ' + src.db_role;
+    return role;
+  }
+
+  function auditChangedKeys(oldRow, newRow) {
+    const prev = oldRow && typeof oldRow === 'object' ? oldRow : {};
+    const next = newRow && typeof newRow === 'object' ? newRow : {};
+    const keys = {};
+    Object.keys(prev).forEach(function (key) { keys[key] = true; });
+    Object.keys(next).forEach(function (key) { keys[key] = true; });
+    return Object.keys(keys).filter(function (key) {
+      return JSON.stringify(prev[key]) !== JSON.stringify(next[key]);
+    }).sort();
   }
 
   function newFileId() {
@@ -361,23 +428,35 @@
       assertId(employeeId);
       filter += '&employee_id=eq.' + employeeId;
     }
-    const full = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path' + filter;
+    const full = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path,photo_sha256' + filter;
+    const noHash = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path' + filter;
     const noPhoto = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy' + filter;
     const plain = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp' + filter;
     try {
       return await request(full) || [];
     } catch (err) {
-      if (isMissingPhotoColumn(err)) {
+      if (isMissingPhotoHashColumn(err)) {
         try {
-          return await request(noPhoto) || [];
+          return await request(noHash) || [];
         } catch (err2) {
-          if (!isMissingLocationColumn(err2)) throw err2;
-          return await request(plain) || [];
+          return await listRecordsFallback(err2, noPhoto, plain);
         }
       }
-      if (!isMissingLocationColumn(err)) throw err;
-      return await request(plain) || [];
+      return await listRecordsFallback(err, noPhoto, plain);
     }
+  }
+
+  async function listRecordsFallback(err, noPhoto, plain) {
+    if (isMissingPhotoColumn(err)) {
+      try {
+        return await request(noPhoto) || [];
+      } catch (err2) {
+        if (!isMissingLocationColumn(err2)) throw err2;
+        return await request(plain) || [];
+      }
+    }
+    if (!isMissingLocationColumn(err)) throw err;
+    return await request(plain) || [];
   }
 
   async function fetchAttendance(empId, dateFrom, dateTo) {
@@ -480,9 +559,11 @@
     const cleanPin = String(input && input.pin || '').trim();
     const action = input && input.action;
     const photoPath = String(input && input.photoPath || '');
+    const photoSha256 = String(input && input.photoSha256 || '').toLowerCase();
     if (!isValidPin(cleanPin)) throw new Error('Ingresa un PIN de 4 dígitos');
     if (action !== 'checkin' && action !== 'checkout') throw new Error('Acción no válida');
     if (!isPhotoPath(photoPath)) throw new Error('Falta la foto. No se registró la asistencia.');
+    if (!isPhotoSha256(photoSha256)) throw new Error('Falta la huella de la foto. No se registró la asistencia.');
     const loc = sanitizeLocation(input.location);
     const emp = await verifyPin(cleanPin);
     if (!emp) throw new Error('PIN no encontrado');
@@ -499,13 +580,14 @@
           p_lat: loc ? loc.lat : null,
           p_lng: loc ? loc.lng : null,
           p_accuracy: loc ? loc.accuracy : null,
-          p_photo_path: photoPath
+          p_photo_path: photoPath,
+          p_photo_sha256: photoSha256
         });
         state.registerMode = 'rpc';
         if (!rows[0]) throw new Error('No se pudo registrar');
         return normalizePunch(rows[0], { action, saved_location: !!loc });
       } catch (err) {
-        if (isMissingPhotoColumn(err)) throw photoColumnError();
+        throwIfPhotoSchema(err);
         if (!isMissingFunction(err)) throw err;
         state.registerMode = 'direct';
       }
@@ -516,7 +598,8 @@
       employee_name: emp.name,
       action,
       timestamp: new Date().toISOString(),
-      photo_path: photoPath
+      photo_path: photoPath,
+      photo_sha256: photoSha256
     };
 
     let inserted = null;
@@ -529,13 +612,14 @@
           action: base.action,
           timestamp: base.timestamp,
           photo_path: photoPath,
+          photo_sha256: photoSha256,
           lat: loc.lat,
           lng: loc.lng,
           accuracy: loc.accuracy
         });
         sentLocation = true;
       } catch (err) {
-        if (isMissingPhotoColumn(err)) throw photoColumnError();
+        throwIfPhotoSchema(err);
         if (!isMissingLocationColumn(err)) throw err;
       }
     }
@@ -543,7 +627,7 @@
       try {
         inserted = await insertRow('kiosk_attendance', base);
       } catch (err) {
-        if (isMissingPhotoColumn(err)) throw photoColumnError();
+        throwIfPhotoSchema(err);
         throw err;
       }
     }
@@ -833,6 +917,51 @@
     });
   }
 
+  function auditSchemaError() {
+    return new Error('Falta la bitácora. Corre sql/06_bitacora_auditoria.sql en Supabase.');
+  }
+
+  async function adminAuditHistory(code, tableName, recordId) {
+    if (tableName !== 'kiosk_attendance' && tableName !== 'kiosk_employees') {
+      throw new Error('Tabla no válida');
+    }
+    if (!/^[0-9A-Za-z-]{1,80}$/.test(String(recordId || ''))) {
+      throw new Error('Identificador inválido');
+    }
+    try {
+      return await rpc('admin_list_kiosk_audit', {
+        p_code: String(code || ''),
+        p_table: tableName,
+        p_record_id: String(recordId)
+      }) || [];
+    } catch (err) {
+      if (isMissingFunction(err)) throw auditSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminVerifyAudit(code) {
+    try {
+      const rows = await rpc('admin_verify_kiosk_audit', { p_code: String(code || '') });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw auditSchemaError();
+      throw err;
+    }
+  }
+
+  async function photoMatchesStoredHash(photoPath, expected) {
+    if (!isPhotoPath(photoPath) || !isPhotoSha256(expected)) {
+      return { checked: false, ok: false, detail: 'sin huella' };
+    }
+    const url = await signedPhotoUrl(photoPath);
+    const res = await fetch(url);
+    if (!res.ok) return { checked: true, ok: false, detail: 'no se pudo leer la foto' };
+    const got = await sha256Hex(await res.arrayBuffer());
+    const ok = got === expected;
+    return { checked: true, ok, detail: ok ? 'coincide' : 'la foto no coincide con la huella guardada' };
+  }
+
   async function compressPhotoFromVideo(video, deps) {
     const source = video || {};
     const size = fitPhotoSize(source.videoWidth, source.videoHeight, PHOTO_MAX_WIDTH);
@@ -873,7 +1002,13 @@
     isMissingFunction,
     isMissingLocationColumn,
     isMissingPhotoColumn,
+    isMissingPhotoHashColumn,
     isPhotoPath,
+    isPhotoSha256,
+    sha256Hex,
+    auditActionLabel,
+    auditActorLabel,
+    auditChangedKeys,
     attendancePhotoPath,
     fitPhotoSize,
     cameraErrorMessage,
@@ -894,6 +1029,9 @@
     readLocation,
     adminList,
     adminAdd,
-    adminDelete
+    adminDelete,
+    adminAuditHistory,
+    adminVerifyAudit,
+    photoMatchesStoredHash
   };
 });

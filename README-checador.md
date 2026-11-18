@@ -22,12 +22,13 @@ Hay que fusionar el cambio a `main` antes de que Pages lo sirva. El tablero enla
 
 En el proyecto ya se corrieron `sql/01_ubicacion_kiosk_attendance.sql` y `sql/02_seed_empleados.sql`. **No hace falta volver a correrlos.**
 
-Para la foto hay que correr, en el SQL Editor y en este orden:
+Para la foto y la bitácora hay que correr, en el SQL Editor y en este orden:
 
-1. `sql/04_foto_kiosk_attendance.sql` — columna `photo_path`, bucket privado `attendance-photos`, políticas y la función de registro con foto. **Sin este paso el kiosco nuevo no guarda la checada.** No lo corras a ciegas: léelo antes. No usa ni pide la service role.
-2. `sql/05_retencion_fotos_asistencia.sql` — opcional. Solo crea funciones para listar fotos de más de 90 días y, después, limpiar la ruta. **No borra archivos y no queda programado.** El cron de ejemplo está comentado.
+1. `sql/04_foto_kiosk_attendance.sql` — columna `photo_path`, bucket privado `attendance-photos` y políticas. Léelo antes. No usa ni pide la service role.
+2. `sql/06_bitacora_auditoria.sql` — huella SHA-256 de cada foto, bitácora que solo crece, y la verificación de la cadena. **Sin el 04 y el 06 el kiosco nuevo no guarda la checada.**
+3. `sql/05_retencion_fotos_asistencia.sql` — opcional. Solo crea funciones para listar fotos de más de 90 días y, después, limpiar la ruta. **No borra archivos y no queda programado.** El cron de ejemplo está comentado.
 
-**No corras el paso 3** mientras el kiosko y la admin tengan que seguir con la llave anon y el esquema actual. `sql/03_seguridad_pin_y_admin.sql` queda para más adelante. Si algún día se corre, su `register_attendance` ya pide la foto del paso 4.
+**No corras el paso 3** mientras el kiosko y la admin tengan que seguir con la llave anon y el esquema actual. `sql/03_seguridad_pin_y_admin.sql` queda para más adelante. Si algún día se corre, su `register_attendance` ya pide la foto y la huella.
 
 Nadie aplicó estos archivos desde el cambio de la foto. Quedan en el repo para que los revise quien administra Supabase.
 
@@ -44,15 +45,17 @@ Los PIN asignados no se republican en este documento. Están en la base y se con
 - La ubicación se pide al abrir y otra vez al marcar. Si la persona acepta, el registro guarda `lat`, `lng` y `accuracy`. Si niega el permiso, tarda demasiado o el navegador falla, **la checada se guarda igual**, con esas columnas vacías, siempre que la foto sí se haya guardado.
 - Un doble clic, o la misma acción repetida en menos de un minuto, no crea otro renglón. Una salida justo después de una entrada sí se guarda.
 - La app de Render no está en este repo, no manda coordenadas y no manda foto. La columna acepta vacío para no romper ese otro cliente. El aparato de Nanofactor tiene que abrir esta página.
-- Publica la página **después** de correr el SQL 4. Si se publica antes, el kiosco explica que falta la columna o el bucket y no registra.
+- La foto guarda también su huella SHA-256 en `photo_sha256`.
+- Publica la página **después** de correr el SQL 4 y el SQL 6. Si se publica antes, el kiosco explica qué falta y no registra.
 
 ## Página de admin
 
 1. Abre `admin-empleados.html`.
 2. Escribe el código de acceso (`nfg-rh` hasta que lo cambies) y pulsa **Entrar**.
-3. **Registros:** elige empleado (o Todos) y una fecha en hora de Ciudad de México. Cada renglón muestra fecha y hora de CDMX, empleado, Entrada o Salida, un enlace a Google Maps y **Ver foto**. La foto se abre con una URL firmada de 60 segundos. Si no hubo coordenadas, dice `sin ubicación`. Si el registro es viejo o vino de otro cliente, dice `sin foto`.
-4. Para agregar: nombre, PIN de 4 dígitos o **Generar PIN** (no repite los que ya están) y **Agregar**.
-5. **Borrar** pide confirmación. Si esa persona **ya tiene asistencia**, no se borra la ficha ni se toca `kiosk_attendance`: no sabemos si la base borraría el historial en cascada, y no se puede cambiar el esquema. Si **no** tiene asistencia, solo se quita la ficha.
+3. **Registros:** elige empleado (o Todos) y una fecha en hora de Ciudad de México. Cada renglón muestra fecha y hora de CDMX, empleado, Entrada o Salida, un enlace a Google Maps, **Ver foto** e **Historial**. La foto se abre con una URL firmada de 60 segundos. Si no hubo coordenadas, dice `sin ubicación`. Si el registro es viejo o vino de otro cliente, dice `sin foto`.
+4. **Verificar integridad** recorre la cadena de la bitácora y contrasta la huella de las fotos de esa lista. El último hash conviene copiarlo fuera de Supabase.
+5. Para agregar: nombre, PIN de 4 dígitos o **Generar PIN** (no repite los que ya están) y **Agregar**. En la ficha también está **Historial**.
+6. **Borrar** pide confirmación. Si esa persona **ya tiene asistencia**, no se borra la ficha ni se toca `kiosk_attendance`: no sabemos si la base borraría el historial en cascada, y no se cambia esa relación. Si **no** tiene asistencia, solo se quita la ficha. La bitácora, si ya existe, conserva el intento.
 
 **Cerrar sesión** olvida el código en esa pestaña.
 
@@ -81,6 +84,22 @@ El tablero de calendario sigue mostrando el mapa del día y el CSV con latitud, 
 3. Acepta, toma la foto y úsala. La pantalla dice que la entrada quedó registrada, con o sin ubicación, y con foto.
 4. Niega la cámara en el navegador: el mensaje pide el permiso y en la admin no aparece una checada nueva.
 5. Entra a la admin, elige a la persona y el día, y pulsa **Ver foto**. La imagen abre. Al minuto ese enlace deja de servir; el botón pide otro.
+
+## Bitácora
+
+Cada alta, cambio o baja de `kiosk_attendance` y de `kiosk_employees` deja una fila en `kiosk_audit_log`, aunque el cambio se haga en el SQL Editor o por la API. La fila trae el valor anterior, el nuevo, el rol (el del JWT si hay sesión, y si no el rol de la base) y la hora del servidor. Las filas se encadenan con SHA-256. La app no puede editarlas ni borrarlas.
+
+Al correr el SQL 6, lo que ya existía queda como **registro inicial**. Lo de antes de ese momento no está en la bitácora.
+
+Límites, dichos en corto:
+
+- Un superusuario de Postgres puede apagar los triggers y entonces sí puede cambiar datos o reescribir la bitácora. Mientras los triggers sigan activos, ese cambio lo rechaza el trigger.
+- Si alguien reescribe la bitácora y recalcula todos los hashes, la verificación de adentro vuelve a decir que está bien. Lo que lo delata es un hash guardado **fuera** de Supabase. **Verificar integridad** muestra el último hash: cópialo a un correo, a otro sistema, o a un repositorio al que no entre quien administra esta base. Si el hash de afuera no coincide, la historia se reescribió.
+- Un cambio hecho con el trigger de auditoría apagado no encaja con la última entrada. La verificación lo cuenta como registro que no coincide.
+- Reemplazar el archivo de la foto sin tocar el renglón no rompe la cadena. Lo nota la huella SHA-256: el botón contrasta las fotos de la lista que estás viendo.
+- La bitácora no se lee con un SELECT abierto. Hace falta el código de la admin, el mismo límite ligero que el resto de esa página.
+
+Conviene verificar seguido, guardar ese hash fuera, y no usar el usuario `postgres` para el trabajo de todos los días.
 
 ## Retención
 

@@ -496,8 +496,9 @@
       const location = await Checador.readLocation();
       showStatus('', '', 'Guardando la foto…');
       const photoPath = Checador.attendancePhotoPath(found.id);
+      const photoSha256 = await Checador.sha256Hex(blob);
       await Checador.uploadAttendancePhoto(photoPath, blob);
-      const row = await Checador.registerAttendance({ pin, action, location, photoPath });
+      const row = await Checador.registerAttendance({ pin, action, location, photoPath, photoSha256 });
       const when = new Date(row.marked_at);
       const time = Number.isNaN(when.getTime())
         ? ''

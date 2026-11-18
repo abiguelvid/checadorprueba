@@ -13,6 +13,8 @@ function photoFor(id) {
   return id + '/2026-11-03/' + PHOTO_FILE;
 }
 
+const PHOTO_SHA = 'ab'.repeat(32);
+
 const RAW_NAMES = [
   'LEON ALBARRAN MENA',
   'MONICA RABASA',
@@ -168,7 +170,7 @@ test('sin la función, el kiosko busca el PIN en la tabla y registra sin ubicaci
     return jsonResponse(500, { message: 'inesperado ' + url });
   };
 
-  const row = await Checador.registerAttendance({ pin: '2465', action: 'checkin', location: null, photoPath: photoFor(EMP_A) });
+  const row = await Checador.registerAttendance({ pin: '2465', action: 'checkin', location: null, photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA });
   assert.equal(row.employee_name, 'LEON ALBARRAN MENA');
   assert.equal(row.saved_location, false);
   assert.equal(row.action, 'checkin');
@@ -202,7 +204,7 @@ test('si faltan columnas de ubicación, reintenta el insert sin ellas', async ()
     pin: '3352',
     action: 'checkout',
     location: { lat: 19.4, lng: -99.1, accuracy: 20 },
-    photoPath: photoFor(EMP_A)
+    photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA
   });
   assert.equal(bodies.length, 2);
   assert.equal(bodies[0].lat, 19.4);
@@ -228,7 +230,8 @@ test('con la función nueva manda la ubicación y no inserta directo', async () 
       p_lat: 19.432,
       p_lng: -99.133,
       p_accuracy: 8,
-      p_photo_path: photoFor(EMP_B)
+      p_photo_path: photoFor(EMP_B),
+      p_photo_sha256: PHOTO_SHA
     });
     return jsonResponse(200, [{
       employee_name: 'PAULINA CÓRDOVA WALTERSPIEL',
@@ -241,7 +244,7 @@ test('con la función nueva manda la ubicación y no inserta directo', async () 
     pin: '3656',
     action: 'checkin',
     location: { latitude: 19.432, longitude: -99.133, accuracy: 8 },
-    photoPath: photoFor(EMP_B)
+    photoPath: photoFor(EMP_B), photoSha256: PHOTO_SHA
   });
   assert.equal(row.saved_location, true);
   assert.equal(row.employee_name, 'PAULINA CÓRDOVA WALTERSPIEL');
@@ -362,7 +365,7 @@ test('no repite la misma acción dentro de un minuto', async () => {
   };
 
   await assert.rejects(
-    () => Checador.registerAttendance({ pin: '2465', action: 'checkin', location: { lat: 19.4, lng: -99.1, accuracy: 10 }, photoPath: photoFor(EMP_A) }),
+    () => Checador.registerAttendance({ pin: '2465', action: 'checkin', location: { lat: 19.4, lng: -99.1, accuracy: 10 }, photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA }),
     /hace un momento/
   );
   assert.equal(posts.length, 0);
@@ -394,7 +397,7 @@ test('no repite la misma acción dentro de un minuto', async () => {
     pin: '2465',
     action: 'checkout',
     location: { lat: 19.4, lng: -99.1, accuracy: 10 },
-    photoPath: photoFor(EMP_A)
+    photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA
   });
   assert.equal(row.action, 'checkout');
   assert.equal(row.saved_location, true);
@@ -445,7 +448,7 @@ test('el día de CDMX y el listado de registros piden la ubicación', async () =
   const id = '22222222-2222-2222-2222-222222222222';
   const rows = await Checador.listRecords(id, '2026-11-03');
   assert.equal(rows[0].lat, null);
-  assert.match(seen, /select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path/);
+  assert.match(seen, /select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path,photo_sha256/);
   assert.match(seen, new RegExp('employee_id=eq.' + id));
   assert.equal(Checador.mapsUrl(rows[0].lat, rows[0].lng), null);
 });
@@ -488,7 +491,7 @@ test('la foto que no es del empleado no se inserta', async () => {
     () => Checador.registerAttendance({
       pin: '2465',
       action: 'checkin',
-      photoPath: photoFor(EMP_B)
+      photoPath: photoFor(EMP_B), photoSha256: PHOTO_SHA
     }),
     /no corresponde/
   );
@@ -520,7 +523,7 @@ test('si falta la columna photo_path no reintenta sin foto', async () => {
       pin: '2465',
       action: 'checkout',
       location: null,
-      photoPath: photoFor(EMP_A)
+      photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA
     }),
     /sql\/04_foto_kiosk_attendance\.sql/
   );
@@ -606,9 +609,10 @@ test('sube el JPEG al bucket privado y firma la URL por 60 segundos', async () =
 
 test('el kiosco toma la foto antes de registrar y la admin la abre firmada', () => {
   const kiosk = read('kiosk-check-in.html');
+  const hashAt = kiosk.indexOf('sha256Hex');
   const uploadAt = kiosk.indexOf('uploadAttendancePhoto');
   const registerAt = kiosk.indexOf('registerAttendance');
-  assert.equal(uploadAt > 0 && uploadAt < registerAt, true);
+  assert.equal(hashAt > 0 && hashAt < uploadAt && uploadAt < registerAt, true);
   assert.match(kiosk, /facingMode:\s*\{\s*ideal:\s*'user'/);
   assert.match(kiosk, /playsinline/);
   assert.match(kiosk, /Checador\.AVISO_FOTO/);
@@ -617,6 +621,10 @@ test('el kiosco toma la foto antes de registrar y la admin la abre firmada', () 
   assert.match(admin, /Ver foto/);
   assert.match(admin, /signedPhotoUrl/);
   assert.match(admin, /dura un minuto/);
+  assert.match(admin, /Verificar integridad/);
+  assert.match(admin, /Historial/);
+  assert.match(admin, /adminVerifyAudit/);
+  assert.match(admin, /adminAuditHistory/);
 });
 
 test('el SQL de la foto deja el bucket privado y la retención apagada', () => {
@@ -638,5 +646,51 @@ test('el SQL de la foto deja el bucket privado y la retención apagada', () => {
   assert.equal(/^\s*select\s+cron\.schedule/im.test(retencion), false);
   assert.equal(/delete\s+from\s+storage\.objects/i.test(retencion), false);
   assert.match(paso3, /p_photo_path text/);
+  assert.match(paso3, /p_photo_sha256 text/);
   assert.match(paso3, /Falta la foto/);
+});
+
+test('la huella de la foto es SHA-256 y sin ella no se llama a la base', async () => {
+  const digest = await Checador.sha256Hex(new TextEncoder().encode('abc'));
+  assert.equal(digest, 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  assert.equal(Checador.isPhotoSha256(digest), true);
+  assert.deepEqual(Checador.auditChangedKeys({ pin: '1111', name: 'A' }, { pin: '2222', name: 'A' }), ['pin']);
+  assert.equal(Checador.auditActionLabel('UPDATE'), 'Cambio');
+  assert.equal(Checador.auditActorLabel({ actor_role: 'anon', db_role: 'anon' }), 'anon');
+
+  Checador.resetClientState();
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return jsonResponse(500, { message: 'no' });
+  };
+  await assert.rejects(
+    () => Checador.registerAttendance({
+      pin: '2465',
+      action: 'checkin',
+      photoPath: photoFor(EMP_A)
+    }),
+    /huella de la foto/
+  );
+  assert.equal(calls, 0);
+});
+
+test('la bitácora es append-only, encadena SHA-256 y no se activa sola', () => {
+  const sql = read('sql/06_bitacora_auditoria.sql');
+  assert.match(sql, /kiosk_audit_log/);
+  assert.match(sql, /0babb132451e906d8a2aa08a94a3f40c8e9887ec79983653ade2050cf9dc7e6a/);
+  assert.match(sql, /extensions\.digest/);
+  assert.match(sql, /sha256/);
+  assert.match(sql, /photo_sha256/);
+  assert.match(sql, /BASELINE/);
+  assert.match(sql, /reject_kiosk_audit_change/);
+  assert.match(sql, /BEFORE UPDATE OR DELETE/);
+  assert.match(sql, /BEFORE TRUNCATE/);
+  assert.match(sql, /pg_trigger_depth\(\) < 1/);
+  assert.match(sql, /admin_verify_kiosk_audit/);
+  assert.match(sql, /admin_list_kiosk_audit/);
+  assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
+  assert.equal(/^\s*(delete|update)\s+from\s+public\.kiosk_audit_log/im.test(sql), false);
+  assert.equal(/^\s*select\s+cron\.schedule/im.test(sql), false);
+  assert.match(sql, /p_photo_sha256/);
 });
