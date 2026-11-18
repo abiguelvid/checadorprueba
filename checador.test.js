@@ -5,6 +5,14 @@ const path = require('node:path');
 
 const Checador = require('./checador.js');
 
+const EMP_A = '11111111-1111-1111-1111-111111111111';
+const EMP_B = '55555555-5555-5555-5555-555555555555';
+const PHOTO_FILE = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jpg';
+
+function photoFor(id) {
+  return id + '/2026-11-03/' + PHOTO_FILE;
+}
+
 const RAW_NAMES = [
   'LEON ALBARRAN MENA',
   'MONICA RABASA',
@@ -160,7 +168,7 @@ test('sin la función, el kiosko busca el PIN en la tabla y registra sin ubicaci
     return jsonResponse(500, { message: 'inesperado ' + url });
   };
 
-  const row = await Checador.registerAttendance({ pin: '2465', action: 'checkin', location: null });
+  const row = await Checador.registerAttendance({ pin: '2465', action: 'checkin', location: null, photoPath: photoFor(EMP_A) });
   assert.equal(row.employee_name, 'LEON ALBARRAN MENA');
   assert.equal(row.saved_location, false);
   assert.equal(row.action, 'checkin');
@@ -193,11 +201,14 @@ test('si faltan columnas de ubicación, reintenta el insert sin ellas', async ()
   const row = await Checador.registerAttendance({
     pin: '3352',
     action: 'checkout',
-    location: { lat: 19.4, lng: -99.1, accuracy: 20 }
+    location: { lat: 19.4, lng: -99.1, accuracy: 20 },
+    photoPath: photoFor(EMP_A)
   });
   assert.equal(bodies.length, 2);
   assert.equal(bodies[0].lat, 19.4);
+  assert.equal(bodies[0].photo_path, photoFor(EMP_A));
   assert.equal(bodies[1].lat, undefined);
+  assert.equal(bodies[1].photo_path, photoFor(EMP_A));
   assert.equal(bodies[1].employee_name, 'MONICA RABASA');
   assert.equal(row.saved_location, false);
 });
@@ -216,7 +227,8 @@ test('con la función nueva manda la ubicación y no inserta directo', async () 
       p_action: 'checkin',
       p_lat: 19.432,
       p_lng: -99.133,
-      p_accuracy: 8
+      p_accuracy: 8,
+      p_photo_path: photoFor(EMP_B)
     });
     return jsonResponse(200, [{
       employee_name: 'PAULINA CÓRDOVA WALTERSPIEL',
@@ -228,7 +240,8 @@ test('con la función nueva manda la ubicación y no inserta directo', async () 
   const row = await Checador.registerAttendance({
     pin: '3656',
     action: 'checkin',
-    location: { latitude: 19.432, longitude: -99.133, accuracy: 8 }
+    location: { latitude: 19.432, longitude: -99.133, accuracy: 8 },
+    photoPath: photoFor(EMP_B)
   });
   assert.equal(row.saved_location, true);
   assert.equal(row.employee_name, 'PAULINA CÓRDOVA WALTERSPIEL');
@@ -349,7 +362,7 @@ test('no repite la misma acción dentro de un minuto', async () => {
   };
 
   await assert.rejects(
-    () => Checador.registerAttendance({ pin: '2465', action: 'checkin', location: { lat: 19.4, lng: -99.1, accuracy: 10 } }),
+    () => Checador.registerAttendance({ pin: '2465', action: 'checkin', location: { lat: 19.4, lng: -99.1, accuracy: 10 }, photoPath: photoFor(EMP_A) }),
     /hace un momento/
   );
   assert.equal(posts.length, 0);
@@ -380,12 +393,14 @@ test('no repite la misma acción dentro de un minuto', async () => {
   const row = await Checador.registerAttendance({
     pin: '2465',
     action: 'checkout',
-    location: { lat: 19.4, lng: -99.1, accuracy: 10 }
+    location: { lat: 19.4, lng: -99.1, accuracy: 10 },
+    photoPath: photoFor(EMP_A)
   });
   assert.equal(row.action, 'checkout');
   assert.equal(row.saved_location, true);
   assert.equal(posts.length, 1);
   assert.equal(posts[0].lat, 19.4);
+  assert.equal(posts[0].photo_path, photoFor(EMP_A));
 });
 
 test('quitar colaborador no borra la ficha si ya hay asistencia', async () => {
@@ -430,7 +445,198 @@ test('el día de CDMX y el listado de registros piden la ubicación', async () =
   const id = '22222222-2222-2222-2222-222222222222';
   const rows = await Checador.listRecords(id, '2026-11-03');
   assert.equal(rows[0].lat, null);
-  assert.match(seen, /select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy/);
+  assert.match(seen, /select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path/);
   assert.match(seen, new RegExp('employee_id=eq.' + id));
   assert.equal(Checador.mapsUrl(rows[0].lat, rows[0].lng), null);
+});
+
+test('sin foto no llama a la base', async () => {
+  Checador.resetClientState();
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return jsonResponse(500, { message: 'no debería llamarse' });
+  };
+  await assert.rejects(
+    () => Checador.registerAttendance({ pin: '2465', action: 'checkin', location: null }),
+    /Falta la foto/
+  );
+  await assert.rejects(
+    () => Checador.registerAttendance({ pin: '2465', action: 'checkin', photoPath: 'no-es-ruta' }),
+    /Falta la foto/
+  );
+  assert.equal(calls, 0);
+});
+
+test('la foto que no es del empleado no se inserta', async () => {
+  Checador.resetClientState();
+  const posts = [];
+  global.fetch = async (url, options) => {
+    if (url.endsWith('/rpc/verify_pin') || url.endsWith('/rpc/register_attendance')) {
+      return jsonResponse(404, { code: 'PGRST202', message: 'Could not find the function public.verify_pin' });
+    }
+    if (url.includes('kiosk_employees?select=id,name&pin=eq.')) {
+      return jsonResponse(200, [{ id: EMP_A, name: 'Persona' }]);
+    }
+    if (options && options.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return jsonResponse(201, []);
+    }
+    return jsonResponse(200, []);
+  };
+  await assert.rejects(
+    () => Checador.registerAttendance({
+      pin: '2465',
+      action: 'checkin',
+      photoPath: photoFor(EMP_B)
+    }),
+    /no corresponde/
+  );
+  assert.equal(posts.length, 0);
+});
+
+test('si falta la columna photo_path no reintenta sin foto', async () => {
+  Checador.resetClientState();
+  const bodies = [];
+  global.fetch = async (url, options) => {
+    if (url.endsWith('/rpc/verify_pin')) {
+      return jsonResponse(200, [{ id: EMP_A, name: 'Persona', is_checked_in: false }]);
+    }
+    if (url.endsWith('/rpc/register_attendance')) {
+      return jsonResponse(404, { code: 'PGRST202', message: 'Could not find the function public.register_attendance' });
+    }
+    if (url.includes('select=action,timestamp') || url.includes('select=action&')) return jsonResponse(200, []);
+    if (options && options.method === 'POST') {
+      bodies.push(JSON.parse(options.body));
+      return jsonResponse(400, {
+        code: 'PGRST204',
+        message: "Could not find the 'photo_path' column of 'kiosk_attendance' in the schema cache"
+      });
+    }
+    return jsonResponse(500, { message: url });
+  };
+  await assert.rejects(
+    () => Checador.registerAttendance({
+      pin: '2465',
+      action: 'checkout',
+      location: null,
+      photoPath: photoFor(EMP_A)
+    }),
+    /sql\/04_foto_kiosk_attendance\.sql/
+  );
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].photo_path, photoFor(EMP_A));
+});
+
+test('comprime a 640 px y la ruta usa el día de CDMX', async () => {
+  const size = Checador.fitPhotoSize(1920, 1080, Checador.PHOTO_MAX_WIDTH);
+  assert.deepEqual(size, { width: 640, height: 360 });
+  assert.deepEqual(Checador.fitPhotoSize(400, 300), { width: 400, height: 300 });
+  assert.throws(() => Checador.fitPhotoSize(0, 10), /no entregó imagen/);
+
+  const path = Checador.attendancePhotoPath(EMP_A, new Date('2026-11-03T15:00:00Z'));
+  assert.match(path, new RegExp('^' + EMP_A + '/2026-11-03/[0-9a-f-]{36}\\.jpg$'));
+  assert.equal(Checador.isPhotoPath(path), true);
+
+  const calls = [];
+  const blob = await Checador.compressPhotoFromVideo(
+    { videoWidth: 1920, videoHeight: 1080 },
+    {
+      createCanvas(width, height) {
+        calls.push({ width, height });
+        const blobs = [
+          { size: Checador.PHOTO_MAX_BYTES + 1, type: 'image/jpeg' },
+          { size: 1200, type: 'image/jpeg' }
+        ];
+        return {
+          getContext() { return { drawImage() {} }; },
+          toBlob(cb, type, quality) {
+            calls.push({ type, quality });
+            cb(blobs.shift());
+          }
+        };
+      }
+    }
+  );
+  assert.equal(blob.size, 1200);
+  assert.equal(calls[0].width, 640);
+  assert.equal(calls[1].quality, Checador.PHOTO_JPEG_QUALITY);
+  assert.equal(calls[2].quality, 0.5);
+});
+
+test('los errores de cámara quedan en español y no suenan a registro hecho', () => {
+  const denied = new Error('Permission denied');
+  denied.name = 'NotAllowedError';
+  assert.match(Checador.cameraErrorMessage(denied), /permiso de la cámara/);
+  assert.match(Checador.cameraErrorMessage(denied), /No se registró la asistencia/);
+  const missing = new Error('Requested device not found');
+  missing.name = 'NotFoundError';
+  assert.match(Checador.cameraErrorMessage(missing), /no tiene una cámara/);
+  const insecure = new Error('insecure');
+  insecure.name = 'SecurityError';
+  assert.match(Checador.cameraErrorMessage(insecure), /HTTPS/);
+  assert.match(Checador.AVISO_FOTO, /validar la asistencia/);
+  assert.match(Checador.AVISO_FOTO, /aviso de privacidad/);
+  assert.match(Checador.AVISO_FOTO, /No se usa para reconocimiento facial/);
+});
+
+test('sube el JPEG al bucket privado y firma la URL por 60 segundos', async () => {
+  Checador.resetClientState();
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, method: options.method, body: options.body, headers: options.headers });
+    if (url.includes('/object/sign/')) {
+      return jsonResponse(200, { signedURL: '/object/sign/attendance-photos/' + photoFor(EMP_A) + '?token=corto' });
+    }
+    return jsonResponse(200, { Key: 'attendance-photos/' + photoFor(EMP_A) });
+  };
+  const blob = { size: 800, type: 'image/jpeg' };
+  await Checador.uploadAttendancePhoto(photoFor(EMP_A), blob);
+  const signed = await Checador.signedPhotoUrl(photoFor(EMP_A));
+  assert.equal(calls[0].method, 'POST');
+  assert.match(calls[0].url, /\/storage\/v1\/object\/attendance-photos\//);
+  assert.equal(calls[0].headers['Content-Type'], 'image/jpeg');
+  assert.equal(calls[0].headers['x-upsert'], 'false');
+  assert.equal(calls[0].body, blob);
+  assert.equal(JSON.parse(calls[1].body).expiresIn, 60);
+  assert.equal(signed, Checador.SUPABASE_URL + '/storage/v1/object/sign/attendance-photos/' + photoFor(EMP_A) + '?token=corto');
+  await assert.rejects(() => Checador.uploadAttendancePhoto(photoFor(EMP_A), { size: 10, type: 'image/png' }), /JPEG/);
+  await assert.rejects(() => Checador.signedPhotoUrl('mal'), /No hay foto/);
+});
+
+test('el kiosco toma la foto antes de registrar y la admin la abre firmada', () => {
+  const kiosk = read('kiosk-check-in.html');
+  const uploadAt = kiosk.indexOf('uploadAttendancePhoto');
+  const registerAt = kiosk.indexOf('registerAttendance');
+  assert.equal(uploadAt > 0 && uploadAt < registerAt, true);
+  assert.match(kiosk, /facingMode:\s*\{\s*ideal:\s*'user'/);
+  assert.match(kiosk, /playsinline/);
+  assert.match(kiosk, /Checador\.AVISO_FOTO/);
+  assert.match(kiosk, /Sin aceptar el aviso no se toma la foto/);
+  const admin = read('admin-empleados.html');
+  assert.match(admin, /Ver foto/);
+  assert.match(admin, /signedPhotoUrl/);
+  assert.match(admin, /dura un minuto/);
+});
+
+test('el SQL de la foto deja el bucket privado y la retención apagada', () => {
+  const foto = read('sql/04_foto_kiosk_attendance.sql');
+  const retencion = read('sql/05_retencion_fotos_asistencia.sql');
+  const paso3 = read('sql/03_seguridad_pin_y_admin.sql');
+  assert.match(foto, /attendance-photos/);
+  assert.match(foto, /false,\s*\n\s*512000/);
+  assert.match(foto, /photo_path/);
+  assert.match(foto, /attendance_photos_insert/);
+  assert.match(foto, /storage\.object\.sign/);
+  assert.match(foto, /p_photo_path/);
+  assert.equal(/^\s*select\s+cron\.schedule/im.test(foto), false);
+  assert.equal(/delete\s+from\s+storage\.objects/i.test(foto), false);
+  assert.equal(/eyJ[A-Za-z0-9_-]{20,}/.test(foto), false);
+  assert.match(retencion, /attendance_photos_older_than/);
+  assert.match(retencion, /clear_old_attendance_photo_paths/);
+  assert.match(retencion, /NO ACTIVADA|NO borra fotos/);
+  assert.equal(/^\s*select\s+cron\.schedule/im.test(retencion), false);
+  assert.equal(/delete\s+from\s+storage\.objects/i.test(retencion), false);
+  assert.match(paso3, /p_photo_path text/);
+  assert.match(paso3, /Falta la foto/);
 });

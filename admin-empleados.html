@@ -69,6 +69,18 @@
     .filters { display: grid; grid-template-columns: 1.4fr 0.7fr auto; gap: 10px; align-items: end; }
     .map-link { color: #27500a; }
     .sin-ubicacion { color: #8c2020; }
+    .sin-foto { color: #888; }
+    .photo-btn { text-transform: none; letter-spacing: 0.04em; padding: 6px 10px; }
+    .overlay[hidden] { display: none; }
+    .overlay {
+      position: fixed; inset: 0; z-index: 5; background: rgba(26, 26, 24, 0.55);
+      display: flex; align-items: center; justify-content: center; padding: 20px;
+    }
+    .photo-card { background: #fff; border-radius: 8px; max-width: 440px; width: 100%; padding: 18px; }
+    .photo-card h2 { font-family: 'Syne', sans-serif; font-size: 18px; margin-bottom: 6px; }
+    .photo-card p { color: #666; font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
+    .photo-card img { display: block; width: 100%; min-height: 180px; max-height: 60vh; object-fit: contain; background: #111; margin-bottom: 12px; }
+    .photo-card .btn { width: 100%; }
     .table-wrap { overflow-x: auto; }
     @media (max-width: 720px) {
       .add-grid { grid-template-columns: 1fr 1fr; }
@@ -112,6 +124,7 @@
         </div>
         <button class="btn" id="recLoad" type="button">Ver</button>
       </div>
+      <div class="note">La foto se abre con un enlace firmado que dura un minuto. El bucket es privado: el enlace deja de servir cuando vence.</div>
       <div class="status-bar" id="recStatus" role="status"></div>
       <div class="table-wrap">
         <table>
@@ -121,6 +134,7 @@
               <th>Empleado</th>
               <th>Acción</th>
               <th>Ubicación</th>
+              <th>Foto</th>
             </tr>
           </thead>
           <tbody id="recBody"></tbody>
@@ -167,6 +181,15 @@
       <tbody id="empBody"></tbody>
     </table>
   </section>
+</div>
+
+<div class="overlay" id="photoOverlay" hidden>
+  <div class="photo-card" role="dialog" aria-modal="true" aria-labelledby="photoTitle">
+    <h2 id="photoTitle">Foto de la checada</h2>
+    <p id="photoCaption"></p>
+    <img id="photoImg" alt="Foto tomada al checar" />
+    <button class="btn" id="photoClose" type="button">Cerrar</button>
+  </div>
 </div>
 
 <script src="checador.js"></script>
@@ -216,7 +239,7 @@
     if (!rows.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 4;
+      td.colSpan = 5;
       td.className = 'empty';
       td.textContent = 'No hay registros en esa fecha.';
       tr.appendChild(td);
@@ -249,9 +272,49 @@
         span.textContent = 'sin ubicación';
         where.appendChild(span);
       }
-      tr.append(when, who, action, where);
+      const photo = document.createElement('td');
+      if (Checador.isPhotoPath(row.photo_path)) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-outline photo-btn';
+        btn.textContent = 'Ver foto';
+        btn.addEventListener('click', () => showPhoto(row, btn));
+        photo.appendChild(btn);
+      } else {
+        const span = document.createElement('span');
+        span.className = 'sin-foto';
+        span.textContent = 'sin foto';
+        photo.appendChild(span);
+      }
+      tr.append(when, who, action, where, photo);
       body.appendChild(tr);
     });
+  }
+
+  function closePhoto() {
+    const overlay = $('photoOverlay');
+    overlay.hidden = true;
+    $('photoImg').removeAttribute('src');
+  }
+
+  async function showPhoto(row, button) {
+    button.disabled = true;
+    setStatus($('recStatus'), 'Abriendo la foto…');
+    try {
+      const url = await Checador.signedPhotoUrl(row.photo_path);
+      $('photoCaption').textContent = (row.employee_name || 'Empleado')
+        + ' · ' + Checador.actionLabel(row.action)
+        + ' · ' + Checador.formatCdmx(row.timestamp)
+        + '. Este enlace dura un minuto.';
+      $('photoImg').src = url;
+      $('photoOverlay').hidden = false;
+      $('photoClose').focus();
+      setStatus($('recStatus'), 'Foto abierta. El enlace dura un minuto.', 'ok');
+    } catch (err) {
+      setStatus($('recStatus'), err.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function loadRecords() {
@@ -396,6 +459,13 @@
   });
   $('filter').addEventListener('input', render);
   $('recLoad').addEventListener('click', loadRecords);
+  $('photoClose').addEventListener('click', closePhoto);
+  $('photoOverlay').addEventListener('click', (ev) => {
+    if (ev.target === $('photoOverlay')) closePhoto();
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !$('photoOverlay').hidden) closePhoto();
+  });
   $('recDate').value = Checador.todayCdmx();
 
   $('btnLogout').addEventListener('click', () => {

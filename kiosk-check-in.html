@@ -120,13 +120,52 @@
     .status strong { display: block; font-family: 'Syne', sans-serif; font-size: 15px; margin-bottom: 2px; }
     .foot { margin-top: 22px; font-size: 11px; color: #555; display: flex; gap: 14px; }
     .foot a { color: #888; }
+    .overlay[hidden] { display: none; }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      background: rgba(0, 0, 0, 0.78);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .photo-card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 22px 20px 18px;
+    }
+    .photo-card h2 {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      line-height: 1.1;
+      margin-bottom: 8px;
+    }
+    .photo-copy { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 14px; }
+    .photo-card video,
+    .photo-card img {
+      display: block;
+      width: 100%;
+      max-height: 48vh;
+      object-fit: cover;
+      background: #000;
+      margin-bottom: 14px;
+    }
+    .photo-card video { transform: scaleX(-1); }
+    .photo-card video[hidden],
+    .photo-card img[hidden] { display: none; }
+    .photo-actions { display: grid; gap: 8px; }
+    .photo-actions button { width: 100%; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo">Nanofactor · Asistencia</div>
     <h1>Registro<br>de entrada</h1>
-    <p class="subtitle">Ingresa tu PIN. El navegador pide la ubicación; si la niegas o falla, la entrada o la salida se registran igual. La misma acción no se vuelve a guardar durante un minuto.</p>
+    <p class="subtitle">Ingresa tu PIN y toma una foto con la cámara frontal. Sin foto no se registra la entrada ni la salida. La ubicación se guarda si el navegador la da; si la niegas, la checada se guarda igual. La misma acción no se vuelve a guardar durante un minuto.</p>
     <div class="clock" id="clock">--:--:--</div>
     <div class="date" id="dateLine"></div>
     <div class="state" id="state">
@@ -144,6 +183,16 @@
     <div class="foot">
       <a href="external-check-in-dashboard.html">Tablero</a>
       <a href="admin-empleados.html">Admin</a>
+    </div>
+  </div>
+
+  <div class="overlay" id="photoOverlay" hidden>
+    <div class="photo-card" role="dialog" aria-modal="true" aria-labelledby="photoTitle">
+      <h2 id="photoTitle">Foto de asistencia</h2>
+      <p class="photo-copy" id="photoCopy"></p>
+      <video id="photoVideo" playsinline autoplay muted hidden></video>
+      <img id="photoStill" alt="Vista previa de la foto" hidden />
+      <div class="photo-actions" id="photoActions"></div>
     </div>
   </div>
 
@@ -230,6 +279,175 @@
     $('pin').focus();
   });
 
+  const overlay = $('photoOverlay');
+  let photoResolver = null;
+
+  function noticeAccepted() {
+    try { return localStorage.getItem('checador.avisoFoto') === Checador.AVISO_FOTO_VERSION; }
+    catch (_) { return false; }
+  }
+
+  function showPhotoStep(opts) {
+    clearStatus();
+    $('photoTitle').textContent = opts.title;
+    $('photoCopy').textContent = opts.copy || '';
+    $('photoVideo').hidden = !opts.video;
+    $('photoStill').hidden = !opts.still;
+    const actions = $('photoActions');
+    actions.replaceChildren();
+    (opts.actions || []).forEach(item => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = item.className || 'out';
+      btn.textContent = item.label;
+      btn.addEventListener('click', item.onClick);
+      actions.appendChild(btn);
+    });
+    overlay.hidden = false;
+    const first = actions.querySelector('button');
+    if (first) first.focus();
+  }
+
+  function choose(opts) {
+    return new Promise(resolve => {
+      let done = false;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        photoResolver = null;
+        overlay.hidden = true;
+        resolve(value);
+      };
+      photoResolver = () => finish(opts.onEscape);
+      showPhotoStep({
+        title: opts.title,
+        copy: opts.copy,
+        video: opts.video,
+        still: opts.still,
+        actions: (opts.actions || []).map(action => ({
+          label: action.label,
+          className: action.className,
+          onClick: () => finish(action.value)
+        }))
+      });
+    });
+  }
+
+  function stopStream(stream) {
+    if (!stream || typeof stream.getTracks !== 'function') return;
+    stream.getTracks().forEach(track => { try { track.stop(); } catch (_) {} });
+  }
+
+  function withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const err = new Error('tardó demasiado');
+        err.name = 'TimeoutError';
+        reject(err);
+      }, ms);
+      Promise.resolve(promise).then(
+        value => { clearTimeout(timer); resolve(value); },
+        err => { clearTimeout(timer); reject(err); }
+      );
+    });
+  }
+
+  function openCamera() {
+    const devices = navigator.mediaDevices;
+    if (!window.isSecureContext || !devices || typeof devices.getUserMedia !== 'function') {
+      const err = new Error('insecure');
+      err.name = 'SecurityError';
+      return Promise.reject(err);
+    }
+    return devices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    }).catch(err => {
+      if (err && (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError')) {
+        return devices.getUserMedia({ audio: false, video: { facingMode: 'user' } });
+      }
+      throw err;
+    });
+  }
+
+  async function takePhoto() {
+    const video = $('photoVideo');
+    const still = $('photoStill');
+    let stream = null;
+    try {
+      stream = await withTimeout(openCamera(), 12000);
+      video.srcObject = stream;
+      if (video.videoWidth === 0) {
+        await withTimeout(new Promise(resolve => {
+          video.onloadedmetadata = () => resolve();
+        }), 8000);
+      }
+      try { await video.play(); } catch (_) {}
+      while (true) {
+        const shot = await new Promise(resolve => {
+          let done = false;
+          const finish = (value) => {
+            if (done) return;
+            done = true;
+            photoResolver = null;
+            resolve(value);
+          };
+          photoResolver = () => finish(null);
+          showPhotoStep({
+            title: 'Toma la foto',
+            copy: 'La foto solo valida la asistencia. La vista de la cámara se ve en espejo.',
+            video: true,
+            actions: [
+              {
+                label: 'Tomar foto',
+                className: 'in',
+                onClick: () => {
+                  Checador.compressPhotoFromVideo(video).then(
+                    blob => finish(blob),
+                    err => finish(err)
+                  );
+                }
+              },
+              { label: 'Cancelar', className: 'out', onClick: () => finish(null) }
+            ]
+          });
+        });
+        overlay.hidden = true;
+        if (shot instanceof Error) throw shot;
+        if (!shot) return null;
+        const blob = shot;
+        const url = URL.createObjectURL(blob);
+        still.src = url;
+        let choice = 'cancel';
+        try {
+          choice = await choose({
+            title: '¿Usamos esta foto?',
+            copy: 'Así se guarda la foto, junto con la hora y la ubicación si la hay.',
+            still: true,
+            onEscape: 'cancel',
+            actions: [
+              { label: 'Usar esta foto', className: 'in', value: 'use' },
+              { label: 'Repetir', className: 'out', value: 'retry' },
+              { label: 'Cancelar', className: 'out', value: 'cancel' }
+            ]
+          });
+        } finally {
+          URL.revokeObjectURL(url);
+          still.removeAttribute('src');
+        }
+        if (choice === 'use') return blob;
+        if (choice === 'cancel') return null;
+      }
+    } finally {
+      stopStream(stream);
+      video.srcObject = null;
+      video.hidden = true;
+      still.hidden = true;
+      still.removeAttribute('src');
+      overlay.hidden = true;
+    }
+  }
+
   async function punch(action) {
     if (busy) return;
     const pin = $('pin').value.trim();
@@ -239,25 +457,70 @@
     }
     busy = true;
     setBusy(true);
-    showStatus('', '', 'Buscando ubicación… si no hay permiso, se guarda igual');
-    const location = await Checador.readLocation();
     try {
-      const row = await Checador.registerAttendance({ pin, action, location });
+      showStatus('', '', 'Revisando el PIN…');
+      const found = await Checador.verifyPin(pin);
+      if (!found) throw new Error('PIN no encontrado');
+
+      if (!noticeAccepted()) {
+        const accepted = await choose({
+          title: 'Aviso sobre la foto',
+          copy: Checador.AVISO_FOTO,
+          onEscape: false,
+          actions: [
+            { label: 'Entendido', className: 'in', value: true },
+            { label: 'Cancelar', className: 'out', value: false }
+          ]
+        });
+        if (!accepted) {
+          showStatus('err', '', 'Sin aceptar el aviso no se toma la foto ni se registra la asistencia.');
+          return;
+        }
+        try { localStorage.setItem('checador.avisoFoto', Checador.AVISO_FOTO_VERSION); } catch (_) {}
+      }
+
+      showStatus('', '', 'Abriendo la cámara…');
+      let blob = null;
+      try {
+        blob = await takePhoto();
+      } catch (err) {
+        showStatus('err', '', Checador.cameraErrorMessage(err));
+        return;
+      }
+      if (!blob) {
+        showStatus('err', '', 'Se canceló la foto. No se registró la asistencia.');
+        return;
+      }
+
+      showStatus('', '', 'Buscando ubicación… si no hay permiso, se guarda igual');
+      const location = await Checador.readLocation();
+      showStatus('', '', 'Guardando la foto…');
+      const photoPath = Checador.attendancePhotoPath(found.id);
+      await Checador.uploadAttendancePhoto(photoPath, blob);
+      const row = await Checador.registerAttendance({ pin, action, location, photoPath });
       const when = new Date(row.marked_at);
       const time = Number.isNaN(when.getTime())
         ? ''
         : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
       const verb = action === 'checkin' ? 'Entrada registrada' : 'Salida registrada';
       const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
-      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where);
+      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where + ' · foto guardada');
       $('pin').value = '';
       hideState();
     } catch (err) {
       showStatus('err', '', err.message || 'No se pudo registrar');
     } finally {
       setBusy(false);
+      overlay.hidden = true;
     }
   }
+
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !overlay.hidden && photoResolver) {
+      ev.preventDefault();
+      photoResolver();
+    }
+  });
 
   $('btnIn').addEventListener('click', () => punch('checkin'));
   $('btnOut').addEventListener('click', () => punch('checkout'));
