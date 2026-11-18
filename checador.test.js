@@ -607,6 +607,19 @@ test('sube el JPEG al bucket privado y firma la URL por 60 segundos', async () =
   await assert.rejects(() => Checador.signedPhotoUrl('mal'), /No hay foto/);
 });
 
+test('el error de Storage se muestra con su código', async () => {
+  Checador.resetClientState();
+  global.fetch = async () => jsonResponse(403, {
+    statusCode: '403',
+    code: '42501',
+    message: 'new row violates row-level security policy'
+  });
+  await assert.rejects(
+    () => Checador.uploadAttendancePhoto(photoFor(EMP_A), { size: 20, type: 'image/jpeg' }),
+    /403 · 42501 · new row violates row-level security policy/
+  );
+});
+
 test('el kiosco toma la foto antes de registrar y la admin la abre firmada', () => {
   const kiosk = read('kiosk-check-in.html');
   const hashAt = kiosk.indexOf('sha256Hex');
@@ -651,6 +664,13 @@ test('el SQL de la foto deja el bucket privado y la retención apagada', () => {
   assert.equal(ownsStorageTable(foto), false);
   assert.equal(ownsStorageTable(retencion), false);
   assert.equal(ownsStorageTable(read('sql/06_bitacora_auditoria.sql')), false);
+  assert.equal(ownsStorageTable(read('sql/07_politica_insert_foto.sql')), false);
+  assert.match(stripSqlComments(foto), /storage\.foldername\(storage\.objects\.name\)/);
+  assert.doesNotMatch(stripSqlComments(foto), /storage\.foldername\(name\)/);
+  assert.match(stripSqlComments(read('sql/07_politica_insert_foto.sql')), /storage\.foldername\(storage\.objects\.name\)/);
+  const diagnostico = read('sql/diagnostico_foto_solo_lectura.sql');
+  assert.match(diagnostico, /foldername\(e\.name\)/);
+  assert.equal(/^\s*(insert|update|delete|alter|drop|create)\b/im.test(stripSqlComments(diagnostico)), false);
 });
 
 function stripSqlComments(sql) {

@@ -807,18 +807,27 @@
     try { return JSON.parse(text); } catch (_) { return null; }
   }
 
+  function storageHint(err) {
+    if (!err) return '';
+    const status = err.status ? String(err.status) : '';
+    const code = err.code ? String(err.code) : '';
+    const message = String(err.message || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+    const bits = [status, code, message].filter(Boolean);
+    return bits.length ? ' Detalle: ' + bits.join(' · ') + '.' : '';
+  }
+
   function uploadErrorMessage(err) {
     const blob = errText(err);
     if (err && (err.status === 404 || /bucket/i.test(blob) && /not found/i.test(blob))) {
-      return 'No existe el bucket privado attendance-photos. Corre sql/04_foto_kiosk_attendance.sql en Supabase. No se registró la asistencia.';
+      return 'No existe el bucket privado attendance-photos. Corre sql/04_foto_kiosk_attendance.sql en Supabase.' + storageHint(err) + ' No se registró la asistencia.';
     }
     if (err && (err.status === 401 || err.status === 403 || /row-level security|unauthorized|permission/i.test(blob))) {
-      return 'La base no aceptó la foto. Revisa las políticas del bucket en sql/04_foto_kiosk_attendance.sql. No se registró la asistencia.';
+      return 'La base no aceptó la foto. Revisa las políticas del bucket en sql/04_foto_kiosk_attendance.sql.' + storageHint(err) + ' No se registró la asistencia.';
     }
     if (err && (err.status === 413 || /too large|payload|exceeded/i.test(blob))) {
-      return 'La foto pesa demasiado. No se registró la asistencia.';
+      return 'La foto pesa demasiado.' + storageHint(err) + ' No se registró la asistencia.';
     }
-    return 'No se pudo guardar la foto. No se registró la asistencia.';
+    return 'No se pudo guardar la foto.' + storageHint(err) + ' No se registró la asistencia.';
   }
 
   function signedUrlErrorMessage(err) {
