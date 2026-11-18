@@ -2,6 +2,8 @@
 -- La anon key deja de poder leer kiosk_employees.pin y de insertar,
 -- editar o borrar empleados. El tablero sigue leyendo id y name.
 -- El kiosko valida el PIN con verify_pin / register_attendance.
+-- register_attendance exige photo_path (sql/04). Si la columna todavía
+-- no existe, la función avisa y no inserta.
 -- La página de admin usa las funciones admin_* con el código de acceso.
 --
 -- Código inicial: nfg-rh
@@ -108,12 +110,18 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS public.register_attendance(text, text, double precision, double precision, double precision);
+DROP FUNCTION IF EXISTS public.register_attendance(text, text, double precision, double precision, double precision, text);
+DROP FUNCTION IF EXISTS public.register_attendance(text, text, double precision, double precision, double precision, text, text);
+
 CREATE OR REPLACE FUNCTION public.register_attendance(
   p_pin text,
   p_action text,
   p_lat double precision DEFAULT NULL,
   p_lng double precision DEFAULT NULL,
-  p_accuracy double precision DEFAULT NULL
+  p_accuracy double precision DEFAULT NULL,
+  p_photo_path text DEFAULT NULL,
+  p_photo_sha256 text DEFAULT NULL
 )
 RETURNS TABLE (
   employee_id uuid,
@@ -134,6 +142,10 @@ DECLARE
   v_lng double precision;
   v_acc double precision;
   v_has_loc boolean;
+  v_has_photo boolean;
+  v_has_sha boolean;
+  v_photo text;
+  v_sha text;
   v_ts timestamptz;
   v_saved boolean := false;
 BEGIN
@@ -154,6 +166,19 @@ BEGIN
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'PIN no encontrado';
+  END IF;
+
+  v_photo := btrim(coalesce(p_photo_path, ''));
+  IF v_photo !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$' THEN
+    RAISE EXCEPTION 'Falta la foto. No se registró la asistencia.';
+  END IF;
+  IF split_part(v_photo, '/', 1) IS DISTINCT FROM v_id::text THEN
+    RAISE EXCEPTION 'La foto no corresponde al empleado. No se registró la asistencia.';
+  END IF;
+
+  v_sha := lower(btrim(coalesce(p_photo_sha256, '')));
+  IF v_sha !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'Falta la huella de la foto. No se registró la asistencia.';
   END IF;
 
   IF EXISTS (
@@ -194,27 +219,45 @@ BEGIN
     )
   INTO v_has_loc;
 
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'kiosk_attendance' AND column_name = 'photo_path'
+  ) INTO v_has_photo;
+
+  IF NOT v_has_photo THEN
+    RAISE EXCEPTION 'Falta la columna photo_path. Corre sql/04_foto_kiosk_attendance.sql. No se registró la asistencia.';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'kiosk_attendance' AND column_name = 'photo_sha256'
+  ) INTO v_has_sha;
+
+  IF NOT v_has_sha THEN
+    RAISE EXCEPTION 'Falta la columna photo_sha256. Corre sql/06_bitacora_auditoria.sql. No se registró la asistencia.';
+  END IF;
+
   IF v_has_loc THEN
     EXECUTE $q$
       INSERT INTO public.kiosk_attendance
-        (employee_id, employee_name, action, "timestamp", lat, lng, accuracy)
-      VALUES ($1, $2, $3, now(), $4, $5, $6)
+        (employee_id, employee_name, action, "timestamp", lat, lng, accuracy, photo_path, photo_sha256)
+      VALUES ($1, $2, $3, now(), $4, $5, $6, $7, $8)
       RETURNING "timestamp"
     $q$
     INTO v_ts
-    USING v_id, v_name, v_action, v_lat, v_lng, v_acc;
+    USING v_id, v_name, v_action, v_lat, v_lng, v_acc, v_photo, v_sha;
     IF v_lat IS NULL OR v_lng IS NULL THEN
       v_saved := false;
     END IF;
   ELSE
     EXECUTE $q$
       INSERT INTO public.kiosk_attendance
-        (employee_id, employee_name, action, "timestamp")
-      VALUES ($1, $2, $3, now())
+        (employee_id, employee_name, action, "timestamp", photo_path, photo_sha256)
+      VALUES ($1, $2, $3, now(), $4, $5)
       RETURNING "timestamp"
     $q$
     INTO v_ts
-    USING v_id, v_name, v_action;
+    USING v_id, v_name, v_action, v_photo, v_sha;
     v_saved := false;
   END IF;
 
@@ -351,13 +394,13 @@ $$;
 
 REVOKE ALL ON FUNCTION public.kiosk_admin_ok(text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.verify_pin(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.admin_list_employees(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.admin_add_employee(text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.admin_delete_employee(text, uuid) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION public.verify_pin(text) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_list_employees(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_add_employee(text, text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_delete_employee(text, uuid) TO anon, authenticated;
@@ -366,7 +409,7 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.verify_pin(text) TO service_role';
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision) TO service_role';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.register_attendance(text, text, double precision, double precision, double precision, text, text) TO service_role';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.admin_list_employees(text) TO service_role';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.admin_add_employee(text, text, text) TO service_role';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.admin_delete_employee(text, uuid) TO service_role';

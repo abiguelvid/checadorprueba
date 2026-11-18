@@ -13,6 +13,16 @@
   const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqaWNuYWFtdnVsdW9tbWN0cGhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0ODUwMjcsImV4cCI6MjA4ODA2MTAyN30.RevJFA0u6Ts4la2vyjgaTgtvqFWeqJTo0zrCg8wOCOY';
   const ADMIN_ACCESS_CODE_FALLBACK = 'nfg-rh';
   const DUPLICATE_WINDOW_MS = 60 * 1000;
+  const PHOTO_BUCKET = 'attendance-photos';
+  const PHOTO_MAX_WIDTH = 640;
+  const PHOTO_JPEG_QUALITY = 0.72;
+  const PHOTO_MAX_BYTES = 500 * 1024;
+  const SIGNED_URL_SECONDS = 60;
+  /* Texto del aviso. Edítalo aquí si cambia el aviso de privacidad
+     y sube AVISO_FOTO_VERSION para que el kiosco lo vuelva a mostrar. */
+  const AVISO_FOTO_VERSION = '1';
+  const AVISO_FOTO = 'La foto se toma solo para validar la asistencia, conforme al aviso de privacidad de Nanofactor. No se usa para reconocimiento facial.';
+  const PHOTO_PATH_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[0-9]{4}-[0-9]{2}-[0-9]{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/;
 
   const state = {
     adminMode: null,
@@ -126,6 +136,38 @@
     return missing && /\b(lat|lng|accuracy)\b/i.test(blob);
   }
 
+  function isMissingNamedColumn(err, column) {
+    const blob = errText(err);
+    const missing = err.code === 'PGRST204'
+      || err.code === '42703'
+      || /PGRST204/.test(blob)
+      || /42703/.test(blob)
+      || /schema cache/i.test(blob)
+      || /does not exist/i.test(blob);
+    return missing && new RegExp('\\b' + column + '\\b', 'i').test(blob);
+  }
+
+  function isMissingPhotoColumn(err) {
+    return isMissingNamedColumn(err, 'photo_path');
+  }
+
+  function isMissingPhotoHashColumn(err) {
+    return isMissingNamedColumn(err, 'photo_sha256');
+  }
+
+  function photoColumnError() {
+    return new Error('Falta la columna de la foto. Corre sql/04_foto_kiosk_attendance.sql en Supabase. No se registró la asistencia.');
+  }
+
+  function photoHashColumnError() {
+    return new Error('Falta la columna de la huella. Corre sql/06_bitacora_auditoria.sql en Supabase. No se registró la asistencia.');
+  }
+
+  function throwIfPhotoSchema(err) {
+    if (isMissingPhotoHashColumn(err)) throw photoHashColumnError();
+    if (isMissingPhotoColumn(err)) throw photoColumnError();
+  }
+
   function isAdminAuthError(err) {
     const blob = errText(err);
     return err.code === '28000' || /C[oó]digo de acceso incorrecto/.test(blob);
@@ -141,6 +183,129 @@
     if (!/^[0-9a-fA-F-]{8,40}$/.test(String(id || ''))) {
       throw new Error('Identificador inválido');
     }
+  }
+
+  function isPhotoPath(value) {
+    return PHOTO_PATH_RE.test(String(value || ''));
+  }
+
+  function isPhotoSha256(value) {
+    return /^[0-9a-f]{64}$/.test(String(value || ''));
+  }
+
+  async function sha256Hex(data) {
+    let buffer;
+    if (data instanceof ArrayBuffer) buffer = data;
+    else if (ArrayBuffer.isView(data)) {
+      buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    } else if (data && typeof data.arrayBuffer === 'function') {
+      buffer = await data.arrayBuffer();
+    } else {
+      throw new Error('No se pudo calcular la huella de la foto. No se registró la asistencia.');
+    }
+    if (!crypto || !crypto.subtle || typeof crypto.subtle.digest !== 'function') {
+      throw new Error('Este navegador no puede calcular la huella de la foto. No se registró la asistencia.');
+    }
+    const digest = await crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest), function (b) {
+      return b.toString(16).padStart(2, '0');
+    }).join('');
+  }
+
+  function auditActionLabel(action) {
+    if (action === 'INSERT') return 'Alta';
+    if (action === 'UPDATE') return 'Cambio';
+    if (action === 'DELETE') return 'Baja';
+    if (action === 'BASELINE') return 'Registro inicial';
+    return action || '—';
+  }
+
+  function auditActorLabel(row) {
+    const src = row || {};
+    const role = src.actor_role || src.db_role || 'desconocido';
+    if (src.actor_uid) return role + ' · ' + src.actor_uid;
+    if (src.db_role && src.db_role !== role) return role + ' · ' + src.db_role;
+    return role;
+  }
+
+  function auditChangedKeys(oldRow, newRow) {
+    const prev = oldRow && typeof oldRow === 'object' ? oldRow : {};
+    const next = newRow && typeof newRow === 'object' ? newRow : {};
+    const keys = {};
+    Object.keys(prev).forEach(function (key) { keys[key] = true; });
+    Object.keys(next).forEach(function (key) { keys[key] = true; });
+    return Object.keys(keys).filter(function (key) {
+      return JSON.stringify(prev[key]) !== JSON.stringify(next[key]);
+    }).sort();
+  }
+
+  function newFileId() {
+    const cryptoObj = typeof crypto !== 'undefined' ? crypto : null;
+    if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
+      return String(cryptoObj.randomUUID()).toLowerCase();
+    }
+    const bytes = new Uint8Array(16);
+    if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') cryptoObj.getRandomValues(bytes);
+    else {
+      for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+  }
+
+  function attendancePhotoPath(employeeId, now) {
+    const id = String(employeeId || '').toLowerCase();
+    assertId(id);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
+      throw new Error('Identificador inválido');
+    }
+    const ymd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Mexico_City',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(now instanceof Date ? now : new Date());
+    const path = id + '/' + ymd + '/' + newFileId() + '.jpg';
+    if (!isPhotoPath(path)) throw new Error('No se pudo armar la ruta de la foto. No se registró la asistencia.');
+    return path;
+  }
+
+  function fitPhotoSize(width, height, maxWidth) {
+    const max = Number(maxWidth) > 0 ? Number(maxWidth) : PHOTO_MAX_WIDTH;
+    const w = Number(width);
+    const h = Number(height);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+      throw new Error('La cámara no entregó imagen. No se registró la asistencia.');
+    }
+    if (w <= max) return { width: Math.round(w), height: Math.round(h) };
+    return { width: max, height: Math.max(1, Math.round(h * (max / w))) };
+  }
+
+  function cameraErrorMessage(err) {
+    const name = err && (err.name || '') || '';
+    const blob = String(err && err.message || '');
+    if (/No se registró la asistencia/.test(blob) && (!name || name === 'Error')) return blob;
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || /permission|denied|notallowed/i.test(blob)) {
+      return 'No se pudo usar la cámara. Autoriza el permiso de la cámara en el navegador y vuelve a intentar. No se registró la asistencia.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || /not found|no camera|requested device/i.test(blob)) {
+      return 'Este aparato no tiene una cámara que podamos usar. No se registró la asistencia.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError' || /could not start/i.test(blob)) {
+      return 'La cámara está ocupada o no responde. Cierra otras aplicaciones que la usen e inténtalo de nuevo. No se registró la asistencia.';
+    }
+    if (name === 'SecurityError' || name === 'NotSupportedError' || /secure context|insecure|getUserMedia is not/i.test(blob)) {
+      return 'La cámara solo funciona en una página segura (HTTPS). Ábrela desde el enlace del kiosco. No se registró la asistencia.';
+    }
+    if (name === 'TimeoutError' || /tardó demasiado/i.test(blob)) {
+      return 'La cámara tardó demasiado en abrir. No se registró la asistencia.';
+    }
+    if (name === 'AbortError') {
+      return 'Se canceló la cámara. No se registró la asistencia.';
+    }
+    return 'No se pudo tomar la foto. La asistencia no se registró.';
   }
 
   function authError() {
@@ -256,22 +421,42 @@
 
   async function listRecords(employeeId, ymd) {
     const bounds = cdmxDayBounds(ymd);
-    let filter = 'select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy'
-      + '&timestamp=gte.' + encodeURIComponent(bounds.from)
+    let filter = '&timestamp=gte.' + encodeURIComponent(bounds.from)
       + '&timestamp=lte.' + encodeURIComponent(bounds.to)
       + '&order=timestamp.desc&limit=500';
     if (employeeId) {
       assertId(employeeId);
       filter += '&employee_id=eq.' + employeeId;
     }
-    const path = 'kiosk_attendance?' + filter;
+    const full = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path,photo_sha256' + filter;
+    const noHash = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy,photo_path' + filter;
+    const noPhoto = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp,lat,lng,accuracy' + filter;
+    const plain = 'kiosk_attendance?select=id,employee_id,employee_name,action,timestamp' + filter;
     try {
-      return await request(path) || [];
+      return await request(full) || [];
     } catch (err) {
-      if (!isMissingLocationColumn(err)) throw err;
-      const plain = path.replace('lat,lng,accuracy', '').replace('select=id,employee_id,employee_name,action,timestamp,', 'select=id,employee_id,employee_name,action,timestamp');
-      return await request(plain) || [];
+      if (isMissingPhotoHashColumn(err)) {
+        try {
+          return await request(noHash) || [];
+        } catch (err2) {
+          return await listRecordsFallback(err2, noPhoto, plain);
+        }
+      }
+      return await listRecordsFallback(err, noPhoto, plain);
     }
+  }
+
+  async function listRecordsFallback(err, noPhoto, plain) {
+    if (isMissingPhotoColumn(err)) {
+      try {
+        return await request(noPhoto) || [];
+      } catch (err2) {
+        if (!isMissingLocationColumn(err2)) throw err2;
+        return await request(plain) || [];
+      }
+    }
+    if (!isMissingLocationColumn(err)) throw err;
+    return await request(plain) || [];
   }
 
   async function fetchAttendance(empId, dateFrom, dateTo) {
@@ -373,11 +558,18 @@
   async function registerAttendance(input) {
     const cleanPin = String(input && input.pin || '').trim();
     const action = input && input.action;
+    const photoPath = String(input && input.photoPath || '');
+    const photoSha256 = String(input && input.photoSha256 || '').toLowerCase();
     if (!isValidPin(cleanPin)) throw new Error('Ingresa un PIN de 4 dígitos');
     if (action !== 'checkin' && action !== 'checkout') throw new Error('Acción no válida');
+    if (!isPhotoPath(photoPath)) throw new Error('Falta la foto. No se registró la asistencia.');
+    if (!isPhotoSha256(photoSha256)) throw new Error('Falta la huella de la foto. No se registró la asistencia.');
     const loc = sanitizeLocation(input.location);
     const emp = await verifyPin(cleanPin);
     if (!emp) throw new Error('PIN no encontrado');
+    if (photoPath.split('/')[0] !== String(emp.id || '').toLowerCase()) {
+      throw new Error('La foto no corresponde al empleado. No se registró la asistencia.');
+    }
     await assertFresh(emp.id, action);
 
     if (state.registerMode !== 'direct') {
@@ -387,12 +579,15 @@
           p_action: action,
           p_lat: loc ? loc.lat : null,
           p_lng: loc ? loc.lng : null,
-          p_accuracy: loc ? loc.accuracy : null
+          p_accuracy: loc ? loc.accuracy : null,
+          p_photo_path: photoPath,
+          p_photo_sha256: photoSha256
         });
         state.registerMode = 'rpc';
         if (!rows[0]) throw new Error('No se pudo registrar');
         return normalizePunch(rows[0], { action, saved_location: !!loc });
       } catch (err) {
+        throwIfPhotoSchema(err);
         if (!isMissingFunction(err)) throw err;
         state.registerMode = 'direct';
       }
@@ -402,7 +597,9 @@
       employee_id: emp.id,
       employee_name: emp.name,
       action,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      photo_path: photoPath,
+      photo_sha256: photoSha256
     };
 
     let inserted = null;
@@ -414,17 +611,25 @@
           employee_name: base.employee_name,
           action: base.action,
           timestamp: base.timestamp,
+          photo_path: photoPath,
+          photo_sha256: photoSha256,
           lat: loc.lat,
           lng: loc.lng,
           accuracy: loc.accuracy
         });
         sentLocation = true;
       } catch (err) {
+        throwIfPhotoSchema(err);
         if (!isMissingLocationColumn(err)) throw err;
-        inserted = await insertRow('kiosk_attendance', base);
       }
-    } else {
-      inserted = await insertRow('kiosk_attendance', base);
+    }
+    if (!inserted) {
+      try {
+        inserted = await insertRow('kiosk_attendance', base);
+      } catch (err) {
+        throwIfPhotoSchema(err);
+        throw err;
+      }
     }
 
     return normalizePunch(inserted, {
@@ -581,10 +786,211 @@
     }
   }
 
+  async function storageRequest(path, options) {
+    const opts = options || {};
+    const headers = {
+      apikey: SUPABASE_KEY,
+      Authorization: 'Bearer ' + SUPABASE_KEY,
+      Accept: 'application/json'
+    };
+    const extra = opts.headers || {};
+    Object.keys(extra).forEach(function (key) { headers[key] = extra[key]; });
+    const init = { method: opts.method || 'GET', headers };
+    if (opts.body !== undefined) init.body = opts.body;
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      init.signal = AbortSignal.timeout(20000);
+    }
+    const res = await fetch(SUPABASE_URL + '/storage/v1/' + path, init);
+    if (!res.ok) throw await toError(res);
+    const text = await res.text();
+    if (!text) return null;
+    try { return JSON.parse(text); } catch (_) { return null; }
+  }
+
+  function uploadErrorMessage(err) {
+    const blob = errText(err);
+    if (err && (err.status === 404 || /bucket/i.test(blob) && /not found/i.test(blob))) {
+      return 'No existe el bucket privado attendance-photos. Corre sql/04_foto_kiosk_attendance.sql en Supabase. No se registró la asistencia.';
+    }
+    if (err && (err.status === 401 || err.status === 403 || /row-level security|unauthorized|permission/i.test(blob))) {
+      return 'La base no aceptó la foto. Revisa las políticas del bucket en sql/04_foto_kiosk_attendance.sql. No se registró la asistencia.';
+    }
+    if (err && (err.status === 413 || /too large|payload|exceeded/i.test(blob))) {
+      return 'La foto pesa demasiado. No se registró la asistencia.';
+    }
+    return 'No se pudo guardar la foto. No se registró la asistencia.';
+  }
+
+  function signedUrlErrorMessage(err) {
+    const blob = errText(err);
+    if (err && (err.status === 404 || /not found|Object not found/i.test(blob))) {
+      return 'No se encontró la foto. Si el SQL todavía no se corre, o si ya se borró, no se puede abrir.';
+    }
+    if (err && (err.status === 401 || err.status === 403 || /row-level security|unauthorized|permission/i.test(blob))) {
+      return 'No hay permiso para ver la foto. Revisa la política de lectura del bucket attendance-photos.';
+    }
+    return 'No se pudo abrir la foto.';
+  }
+
+  async function uploadAttendancePhoto(photoPath, blob) {
+    if (!isPhotoPath(photoPath)) {
+      throw new Error('La ruta de la foto no es válida. No se registró la asistencia.');
+    }
+    if (!blob || typeof blob.size !== 'number' || blob.size <= 0) {
+      throw new Error('No se pudo preparar la foto. No se registró la asistencia.');
+    }
+    if (blob.size > PHOTO_MAX_BYTES) {
+      throw new Error('La foto pesa demasiado. No se registró la asistencia.');
+    }
+    if (blob.type && blob.type !== 'image/jpeg') {
+      throw new Error('La foto tiene que ser JPEG. No se registró la asistencia.');
+    }
+    const encoded = String(photoPath).split('/').map(encodeURIComponent).join('/');
+    try {
+      await storageRequest('object/' + PHOTO_BUCKET + '/' + encoded, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'cache-control': 'max-age=60',
+          'x-upsert': 'false'
+        },
+        body: blob
+      });
+    } catch (err) {
+      throw new Error(uploadErrorMessage(err));
+    }
+    return photoPath;
+  }
+
+  function absoluteSignedUrl(signed) {
+    const raw = String(signed || '');
+    const absolute = /^https?:\/\//i.test(raw)
+      ? raw
+      : SUPABASE_URL + '/storage/v1' + (raw.startsWith('/') ? raw : '/' + raw);
+    let parsed;
+    try { parsed = new URL(absolute); } catch (_) { parsed = null; }
+    const origin = new URL(SUPABASE_URL).origin;
+    if (!parsed || parsed.protocol !== 'https:' || parsed.origin !== origin || !parsed.pathname.includes('/storage/v1/object/sign/')) {
+      throw new Error('No se pudo abrir la foto.');
+    }
+    return parsed.toString();
+  }
+
+  async function signedPhotoUrl(photoPath) {
+    if (!isPhotoPath(photoPath)) throw new Error('No hay foto para esta checada.');
+    const encoded = String(photoPath).split('/').map(encodeURIComponent).join('/');
+    let data;
+    try {
+      data = await storageRequest('object/sign/' + PHOTO_BUCKET + '/' + encoded, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiresIn: SIGNED_URL_SECONDS })
+      });
+    } catch (err) {
+      throw new Error(signedUrlErrorMessage(err));
+    }
+    const signed = data && (data.signedURL || data.signedUrl);
+    if (!signed) throw new Error('No se pudo abrir la foto.');
+    return absoluteSignedUrl(signed);
+  }
+
+  function defaultCreateCanvas(width, height) {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      throw new Error('No se pudo preparar la foto. No se registró la asistencia.');
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+  }
+
+  function canvasToJpeg(canvas, quality) {
+    return new Promise(function (resolve, reject) {
+      if (!canvas || typeof canvas.toBlob !== 'function') {
+        reject(new Error('No se pudo preparar la foto. No se registró la asistencia.'));
+        return;
+      }
+      canvas.toBlob(function (blob) {
+        if (!blob) reject(new Error('No se pudo preparar la foto. No se registró la asistencia.'));
+        else resolve(blob);
+      }, 'image/jpeg', quality);
+    });
+  }
+
+  function auditSchemaError() {
+    return new Error('Falta la bitácora. Corre sql/06_bitacora_auditoria.sql en Supabase.');
+  }
+
+  async function adminAuditHistory(code, tableName, recordId) {
+    if (tableName !== 'kiosk_attendance' && tableName !== 'kiosk_employees') {
+      throw new Error('Tabla no válida');
+    }
+    if (!/^[0-9A-Za-z-]{1,80}$/.test(String(recordId || ''))) {
+      throw new Error('Identificador inválido');
+    }
+    try {
+      return await rpc('admin_list_kiosk_audit', {
+        p_code: String(code || ''),
+        p_table: tableName,
+        p_record_id: String(recordId)
+      }) || [];
+    } catch (err) {
+      if (isMissingFunction(err)) throw auditSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminVerifyAudit(code) {
+    try {
+      const rows = await rpc('admin_verify_kiosk_audit', { p_code: String(code || '') });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw auditSchemaError();
+      throw err;
+    }
+  }
+
+  async function photoMatchesStoredHash(photoPath, expected) {
+    if (!isPhotoPath(photoPath) || !isPhotoSha256(expected)) {
+      return { checked: false, ok: false, detail: 'sin huella' };
+    }
+    const url = await signedPhotoUrl(photoPath);
+    const res = await fetch(url);
+    if (!res.ok) return { checked: true, ok: false, detail: 'no se pudo leer la foto' };
+    const got = await sha256Hex(await res.arrayBuffer());
+    const ok = got === expected;
+    return { checked: true, ok, detail: ok ? 'coincide' : 'la foto no coincide con la huella guardada' };
+  }
+
+  async function compressPhotoFromVideo(video, deps) {
+    const source = video || {};
+    const size = fitPhotoSize(source.videoWidth, source.videoHeight, PHOTO_MAX_WIDTH);
+    const maker = deps && deps.createCanvas ? deps.createCanvas : defaultCreateCanvas;
+    const canvas = maker(size.width, size.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx || typeof ctx.drawImage !== 'function') {
+      throw new Error('No se pudo preparar la foto. No se registró la asistencia.');
+    }
+    ctx.drawImage(source, 0, 0, size.width, size.height);
+    let blob = await canvasToJpeg(canvas, PHOTO_JPEG_QUALITY);
+    if (blob.size > PHOTO_MAX_BYTES) blob = await canvasToJpeg(canvas, 0.5);
+    if (!blob || blob.size <= 0 || blob.size > PHOTO_MAX_BYTES || (blob.type && blob.type !== 'image/jpeg')) {
+      throw new Error('La foto pesa demasiado. No se registró la asistencia.');
+    }
+    return blob;
+  }
+
   return {
     SUPABASE_URL,
     ADMIN_ACCESS_CODE_FALLBACK,
     DUPLICATE_WINDOW_MS,
+    PHOTO_BUCKET,
+    PHOTO_MAX_WIDTH,
+    PHOTO_JPEG_QUALITY,
+    PHOTO_MAX_BYTES,
+    SIGNED_URL_SECONDS,
+    AVISO_FOTO_VERSION,
+    AVISO_FOTO,
     resetClientState,
     normalizeName,
     isValidPin,
@@ -595,6 +1001,20 @@
     escapeAttr,
     isMissingFunction,
     isMissingLocationColumn,
+    isMissingPhotoColumn,
+    isMissingPhotoHashColumn,
+    isPhotoPath,
+    isPhotoSha256,
+    sha256Hex,
+    auditActionLabel,
+    auditActorLabel,
+    auditChangedKeys,
+    attendancePhotoPath,
+    fitPhotoSize,
+    cameraErrorMessage,
+    compressPhotoFromVideo,
+    uploadAttendancePhoto,
+    signedPhotoUrl,
     isAdminAuthError,
     isPinForbidden,
     listDirectory,
@@ -609,6 +1029,9 @@
     readLocation,
     adminList,
     adminAdd,
-    adminDelete
+    adminDelete,
+    adminAuditHistory,
+    adminVerifyAudit,
+    photoMatchesStoredHash
   };
 });
