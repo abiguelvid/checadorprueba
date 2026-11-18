@@ -69,8 +69,10 @@ SET public = false,
     file_size_limit = EXCLUDED.file_size_limit,
     allowed_mime_types = EXCLUDED.allowed_mime_types;
 
--- storage.objects ya tiene RLS en Supabase. Esto no lo apaga.
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+-- storage.objects ya tiene RLS activo y la tabla es de supabase_storage_admin.
+-- El rol postgres del SQL Editor no puede hacer ALTER, COMMENT ni OWNER sobre
+-- storage.objects ni storage.buckets (ERROR 42501). Las políticas de abajo sí
+-- se pueden crear desde el editor.
 
 CREATE SCHEMA IF NOT EXISTS kiosk_internal;
 

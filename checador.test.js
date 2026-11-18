@@ -648,7 +648,20 @@ test('el SQL de la foto deja el bucket privado y la retención apagada', () => {
   assert.match(paso3, /p_photo_path text/);
   assert.match(paso3, /p_photo_sha256 text/);
   assert.match(paso3, /Falta la foto/);
+  assert.equal(ownsStorageTable(foto), false);
+  assert.equal(ownsStorageTable(retencion), false);
+  assert.equal(ownsStorageTable(read('sql/06_bitacora_auditoria.sql')), false);
 });
+
+function stripSqlComments(sql) {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--.*$/gm, '');
+}
+
+function ownsStorageTable(sql) {
+  const code = stripSqlComments(sql);
+  return /\b(alter\s+table|comment\s+on|owner\s+to)\b[\s\S]{0,240}?\bstorage\.(objects|buckets)\b/i.test(code)
+    || /\bstorage\.(objects|buckets)\b[\s\S]{0,240}?\b(alter\s+table|comment\s+on|owner\s+to)\b/i.test(code);
+}
 
 test('la huella de la foto es SHA-256 y sin ella no se llama a la base', async () => {
   const digest = await Checador.sha256Hex(new TextEncoder().encode('abc'));
