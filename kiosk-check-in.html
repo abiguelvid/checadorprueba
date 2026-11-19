@@ -192,7 +192,7 @@
       <button class="in" id="btnIn" type="button">Entrada</button>
       <button class="out" id="btnOut" type="button">Salida</button>
     </div>
-    <p class="meal-note">Comida · sin foto</p>
+    <p class="meal-note">Comida</p>
     <div class="actions meal">
       <button class="meal-out" id="btnLunchOut" type="button">Salida a comer</button>
       <button class="meal-in" id="btnLunchIn" type="button">Regreso de comer</button>
@@ -484,7 +484,7 @@
         : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
       const verb = action === 'lunch_out' ? 'Salida a comer registrada' : 'Regreso de comer registrado';
       const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
-      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where + ' · sin foto');
+      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where);
       $('pin').value = '';
       hideState();
     } catch (err) {

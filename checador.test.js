@@ -779,6 +779,7 @@ test('la comida no pide foto y respeta la secuencia del día', async () => {
   assert.doesNotMatch(sql, /storage\.objects/);
   assert.match(read('kiosk-check-in.html'), /Salida a comer/);
   assert.match(read('kiosk-check-in.html'), /Regreso de comer/);
+  assert.equal(read('kiosk-check-in.html').includes('sin foto'), false);
   assert.match(read('admin-empleados.html'), /recAction/);
   assert.match(read('external-check-in-dashboard.html'), /Minutos de comida/);
 });
