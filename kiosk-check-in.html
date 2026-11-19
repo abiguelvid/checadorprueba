@@ -77,6 +77,7 @@
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
     .dot.in { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
     .dot.out { background: var(--red); }
+    .dot.lunch { background: #f0d48a; box-shadow: 0 0 6px #f0d48a; }
     label { display: block; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
     input {
       width: 100%;
@@ -93,6 +94,19 @@
     }
     input:focus { border-color: var(--accent); }
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .meal-note {
+      margin: 16px 0 8px;
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .meal { margin-bottom: 4px; }
+    .meal-out, .meal-in {
+      background: transparent;
+      color: #f0d48a;
+      border: 1px solid #6a5a28;
+    }
     button {
       font-family: 'DM Mono', monospace;
       font-size: 12px;
@@ -165,7 +179,7 @@
   <div class="card">
     <div class="logo">Nanofactor · Asistencia</div>
     <h1>Registro<br>de entrada</h1>
-    <p class="subtitle">Ingresa tu PIN y toma una foto con la cámara frontal. Sin foto no se registra la entrada ni la salida. La ubicación se guarda si el navegador la da; si la niegas, la checada se guarda igual. La misma acción no se vuelve a guardar durante un minuto.</p>
+    <p class="subtitle">Ingresa tu PIN. Entrada y salida piden foto. Salida a comer y regreso no. La ubicación se guarda si el navegador la da. La misma acción no se vuelve a guardar durante un minuto.</p>
     <div class="clock" id="clock">--:--:--</div>
     <div class="date" id="dateLine"></div>
     <div class="state" id="state">
@@ -177,6 +191,11 @@
     <div class="actions">
       <button class="in" id="btnIn" type="button">Entrada</button>
       <button class="out" id="btnOut" type="button">Salida</button>
+    </div>
+    <p class="meal-note">Comida · sin foto</p>
+    <div class="actions meal">
+      <button class="meal-out" id="btnLunchOut" type="button">Salida a comer</button>
+      <button class="meal-in" id="btnLunchIn" type="button">Regreso de comer</button>
     </div>
     <button class="clear" id="btnClear" type="button">Limpiar PIN</button>
     <div class="status" id="status" role="status"></div>
@@ -242,15 +261,19 @@
   function hideState() {
     $('state').classList.remove('visible');
   }
-  function showState(isIn, name) {
+  function showState(presence, name) {
     $('state').classList.add('visible');
-    $('dot').className = 'dot ' + (isIn ? 'in' : 'out');
-    $('stateText').textContent = name + (isIn ? ' · actualmente dentro' : ' · fuera');
+    const kind = presence === 'in' ? 'in' : presence === 'lunch' ? 'lunch' : 'out';
+    $('dot').className = 'dot ' + kind;
+    const label = presence === 'in' ? ' · actualmente dentro' : presence === 'lunch' ? ' · en comida' : ' · fuera';
+    $('stateText').textContent = name + label;
   }
   function setBusy(on) {
     busy = on;
     $('btnIn').disabled = on;
     $('btnOut').disabled = on;
+    $('btnLunchOut').disabled = on;
+    $('btnLunchIn').disabled = on;
   }
 
   async function refreshState(pin) {
@@ -260,7 +283,7 @@
       const found = await Checador.verifyPin(pin);
       if (token !== watch) return;
       if (!found) { hideState(); return; }
-      showState(!!found.is_checked_in, found.name);
+      showState(found.presence || (found.is_checked_in ? 'in' : 'out'), found.name);
     } catch (_) {
       if (token === watch) hideState();
     }
@@ -448,11 +471,39 @@
     }
   }
 
+  async function punchMeal(action, pin) {
+    busy = true;
+    setBusy(true);
+    try {
+      showStatus('', '', 'Buscando ubicación… si no hay permiso, se guarda igual');
+      const location = await Checador.readLocation();
+      const row = await Checador.registerAttendance({ pin, action, location });
+      const when = new Date(row.marked_at);
+      const time = Number.isNaN(when.getTime())
+        ? ''
+        : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
+      const verb = action === 'lunch_out' ? 'Salida a comer registrada' : 'Regreso de comer registrado';
+      const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
+      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where + ' · sin foto');
+      $('pin').value = '';
+      hideState();
+    } catch (err) {
+      showStatus('err', '', err.message || 'No se pudo registrar');
+    } finally {
+      setBusy(false);
+      overlay.hidden = true;
+    }
+  }
+
   async function punch(action) {
     if (busy) return;
     const pin = $('pin').value.trim();
     if (!/^[0-9]{4}$/.test(pin)) {
       showStatus('err', '', 'Ingresa un PIN de 4 dígitos');
+      return;
+    }
+    if (action === 'lunch_out' || action === 'lunch_in') {
+      await punchMeal(action, pin);
       return;
     }
     busy = true;
@@ -503,7 +554,13 @@
       const time = Number.isNaN(when.getTime())
         ? ''
         : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
-      const verb = action === 'checkin' ? 'Entrada registrada' : 'Salida registrada';
+      const verb = action === 'checkin'
+        ? 'Entrada registrada'
+        : action === 'lunch_out'
+          ? 'Salida a comer registrada'
+          : action === 'lunch_in'
+            ? 'Regreso de comer registrado'
+            : 'Salida registrada';
       const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
       showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where + ' · foto guardada');
       $('pin').value = '';
@@ -525,6 +582,8 @@
 
   $('btnIn').addEventListener('click', () => punch('checkin'));
   $('btnOut').addEventListener('click', () => punch('checkout'));
+  $('btnLunchOut').addEventListener('click', () => punch('lunch_out'));
+  $('btnLunchIn').addEventListener('click', () => punch('lunch_in'));
   $('pin').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') punch('checkin');
   });

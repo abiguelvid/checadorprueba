@@ -407,7 +407,80 @@
   function actionLabel(action) {
     if (action === 'checkin') return 'Entrada';
     if (action === 'checkout') return 'Salida';
+    if (action === 'lunch_out') return 'Salida a comer';
+    if (action === 'lunch_in') return 'Regreso de comer';
     return action || '—';
+  }
+
+  function needsPhoto(action) {
+    return action === 'checkin' || action === 'checkout';
+  }
+
+  function isLunchAction(action) {
+    return action === 'lunch_out' || action === 'lunch_in';
+  }
+
+  function isAttendanceAction(action) {
+    return needsPhoto(action) || isLunchAction(action);
+  }
+
+  function presenceFromAction(action) {
+    if (action === 'checkin' || action === 'lunch_in') return 'in';
+    if (action === 'lunch_out') return 'lunch';
+    return 'out';
+  }
+
+  function formatDuration(ms) {
+    if (ms == null || !Number.isFinite(ms)) return null;
+    const diffMin = Math.round(ms / 60000);
+    if (diffMin < 0) return null;
+    return Math.floor(diffMin / 60) + 'h ' + (diffMin % 60) + 'm';
+  }
+
+  function summarizeDay(punches) {
+    const list = (punches || []).map(function (p) {
+      const t = typeof p.t === 'number' ? p.t : new Date(p.timestamp).getTime();
+      return { action: p.action, t: t };
+    }).filter(function (p) { return Number.isFinite(p.t); })
+      .sort(function (a, b) { return a.t - b.t; });
+    let checkin = null;
+    let checkout = null;
+    let lunchMs = 0;
+    let open = null;
+    let firstOut = null;
+    let lastIn = null;
+    let meals = 0;
+    list.forEach(function (p) {
+      if (p.action === 'checkin' && !checkin) checkin = p;
+      if (p.action === 'checkout') checkout = p;
+      if (p.action === 'lunch_out') {
+        open = p;
+        if (!firstOut) firstOut = p;
+      } else if (p.action === 'lunch_in' && open) {
+        if (p.t > open.t) lunchMs += p.t - open.t;
+        lastIn = p;
+        meals += 1;
+        open = null;
+      } else if (p.action === 'checkout' && open) {
+        if (p.t > open.t) lunchMs += p.t - open.t;
+        meals += 1;
+        open = null;
+      }
+    });
+    let siteMs = null;
+    if (checkin && checkout && checkout.t >= checkin.t) {
+      siteMs = Math.max(0, checkout.t - checkin.t - lunchMs);
+    }
+    return {
+      lunchMs: lunchMs,
+      siteMs: siteMs,
+      meals: meals,
+      firstOut: firstOut,
+      lastIn: lastIn,
+      openLunch: !!open,
+      lunchLabel: formatDuration(lunchMs) || '0h 0m',
+      siteLabel: siteMs == null ? null : formatDuration(siteMs)
+    };
   }
 
   function todayCdmx() {
@@ -483,7 +556,19 @@
       try {
         const rows = await rpc('verify_pin', { p_pin: clean });
         state.verifyMode = 'rpc';
-        return rows[0] || null;
+        const found = rows[0] || null;
+        if (!found) return null;
+        let presence = found.is_checked_in ? 'in' : 'out';
+        try {
+          const last = await latestPunch(found.id);
+          presence = presenceFromAction(last && last.action);
+        } catch (_) { /* el indicador es opcional */ }
+        return {
+          id: found.id,
+          name: found.name,
+          is_checked_in: presence === 'in',
+          presence: presence
+        };
       } catch (err) {
         if (!isMissingFunction(err)) throw err;
         state.verifyMode = 'direct';
@@ -503,15 +588,14 @@
     if (!emp) return null;
 
     let isCheckedIn = false;
+    let presence = 'out';
     try {
-      assertId(emp.id);
-      const att = await request(
-        'kiosk_attendance?select=action&employee_id=eq.' + emp.id + '&order=timestamp.desc&limit=1'
-      );
-      isCheckedIn = !!(att && att[0] && att[0].action === 'checkin');
+      const last = await latestPunch(emp.id);
+      presence = presenceFromAction(last && last.action);
+      isCheckedIn = presence === 'in';
     } catch (_) { /* el indicador de dentro/fuera es opcional */ }
 
-    return { id: emp.id, name: emp.name, is_checked_in: isCheckedIn };
+    return { id: emp.id, name: emp.name, is_checked_in: isCheckedIn, presence: presence };
   }
 
   function normalizePunch(row, fallback) {
@@ -532,9 +616,45 @@
   }
 
   function duplicateMessage(action) {
-    return action === 'checkin'
-      ? 'Esta entrada ya se registró hace un momento. Espera un minuto para no duplicarla.'
-      : 'Esta salida ya se registró hace un momento. Espera un minuto para no duplicarla.';
+    if (action === 'checkin') return 'Esta entrada ya se registró hace un momento. Espera un minuto para no duplicarla.';
+    if (action === 'lunch_out') return 'Esta salida a comer ya se registró hace un momento. Espera un minuto para no duplicarla.';
+    if (action === 'lunch_in') return 'Este regreso de comer ya se registró hace un momento. Espera un minuto para no duplicarlo.';
+    return 'Esta salida ya se registró hace un momento. Espera un minuto para no duplicarla.';
+  }
+
+  async function latestPunch(employeeId) {
+    assertId(employeeId);
+    const rows = await request(
+      'kiosk_attendance?select=action,timestamp&employee_id=eq.' + employeeId + '&order=timestamp.desc&limit=1'
+    );
+    return (rows && rows[0]) || null;
+  }
+
+  async function assertSequence(employeeId, action) {
+    if (action !== 'lunch_out' && action !== 'lunch_in') return;
+    let last;
+    try {
+      last = await latestPunch(employeeId);
+    } catch (_) {
+      throw new Error('No pude revisar la entrada abierta. No se registró la comida.');
+    }
+    const lastAction = last && last.action;
+    if (action === 'lunch_out') {
+      if (lastAction !== 'checkin' && lastAction !== 'lunch_in') {
+        throw new Error('No hay una entrada abierta. Marca Entrada antes de salir a comer.');
+      }
+      return;
+    }
+    if (lastAction !== 'lunch_out' || !last.timestamp) {
+      throw new Error('No hay una salida a comer de hoy. Marca Salida a comer antes del regreso.');
+    }
+    const bounds = cdmxDayBounds(todayCdmx());
+    const t = new Date(last.timestamp).getTime();
+    const from = new Date(bounds.from).getTime();
+    const to = new Date(bounds.to).getTime();
+    if (!(t >= from && t <= to)) {
+      throw new Error('No hay una salida a comer de hoy. Marca Salida a comer antes del regreso.');
+    }
   }
 
   async function assertFresh(employeeId, action) {
@@ -558,19 +678,23 @@
   async function registerAttendance(input) {
     const cleanPin = String(input && input.pin || '').trim();
     const action = input && input.action;
+    const photoRequired = needsPhoto(action);
     const photoPath = String(input && input.photoPath || '');
     const photoSha256 = String(input && input.photoSha256 || '').toLowerCase();
     if (!isValidPin(cleanPin)) throw new Error('Ingresa un PIN de 4 dígitos');
-    if (action !== 'checkin' && action !== 'checkout') throw new Error('Acción no válida');
-    if (!isPhotoPath(photoPath)) throw new Error('Falta la foto. No se registró la asistencia.');
-    if (!isPhotoSha256(photoSha256)) throw new Error('Falta la huella de la foto. No se registró la asistencia.');
+    if (!isAttendanceAction(action)) throw new Error('Acción no válida');
+    if (photoRequired) {
+      if (!isPhotoPath(photoPath)) throw new Error('Falta la foto. No se registró la asistencia.');
+      if (!isPhotoSha256(photoSha256)) throw new Error('Falta la huella de la foto. No se registró la asistencia.');
+    }
     const loc = sanitizeLocation(input.location);
     const emp = await verifyPin(cleanPin);
     if (!emp) throw new Error('PIN no encontrado');
-    if (photoPath.split('/')[0] !== String(emp.id || '').toLowerCase()) {
+    if (photoRequired && photoPath.split('/')[0] !== String(emp.id || '').toLowerCase()) {
       throw new Error('La foto no corresponde al empleado. No se registró la asistencia.');
     }
     await assertFresh(emp.id, action);
+    await assertSequence(emp.id, action);
 
     if (state.registerMode !== 'direct') {
       try {
@@ -580,14 +704,17 @@
           p_lat: loc ? loc.lat : null,
           p_lng: loc ? loc.lng : null,
           p_accuracy: loc ? loc.accuracy : null,
-          p_photo_path: photoPath,
-          p_photo_sha256: photoSha256
+          p_photo_path: photoRequired ? photoPath : null,
+          p_photo_sha256: photoRequired ? photoSha256 : null
         });
         state.registerMode = 'rpc';
         if (!rows[0]) throw new Error('No se pudo registrar');
         return normalizePunch(rows[0], { action, saved_location: !!loc });
       } catch (err) {
         throwIfPhotoSchema(err);
+        if (isLunchAction(action) && /Acci[oó]n no v[aá]lida/.test(String(err && err.message || ''))) {
+          throw new Error('La comida todavía no está habilitada en la base. Corre sql/08_comida_kiosk_attendance.sql. No se registró.');
+        }
         if (!isMissingFunction(err)) throw err;
         state.registerMode = 'direct';
       }
@@ -596,27 +723,27 @@
     const base = {
       employee_id: emp.id,
       employee_name: emp.name,
-      action,
-      timestamp: new Date().toISOString(),
-      photo_path: photoPath,
-      photo_sha256: photoSha256
+      action: action,
+      timestamp: new Date().toISOString()
     };
+    if (photoRequired) {
+      base.photo_path = photoPath;
+      base.photo_sha256 = photoSha256;
+    }
 
     let inserted = null;
     let sentLocation = false;
     if (loc) {
       try {
-        inserted = await insertRow('kiosk_attendance', {
+        inserted = await insertRow('kiosk_attendance', Object.assign({
           employee_id: base.employee_id,
           employee_name: base.employee_name,
           action: base.action,
           timestamp: base.timestamp,
-          photo_path: photoPath,
-          photo_sha256: photoSha256,
           lat: loc.lat,
           lng: loc.lng,
           accuracy: loc.accuracy
-        });
+        }, photoRequired ? { photo_path: photoPath, photo_sha256: photoSha256 } : {}));
         sentLocation = true;
       } catch (err) {
         throwIfPhotoSchema(err);
@@ -1030,6 +1157,11 @@
     cdmxDayBounds,
     formatCdmx,
     actionLabel,
+    needsPhoto,
+    isLunchAction,
+    presenceFromAction,
+    formatDuration,
+    summarizeDay,
     todayCdmx,
     listRecords,
     fetchAttendance,

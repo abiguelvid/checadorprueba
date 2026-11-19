@@ -25,9 +25,10 @@ En el proyecto ya se corrieron `sql/01_ubicacion_kiosk_attendance.sql` y `sql/02
 Para la foto y la bitácora hay que correr, en el SQL Editor y en este orden:
 
 1. `sql/04_foto_kiosk_attendance.sql` — columna `photo_path`, bucket privado `attendance-photos` y políticas. Léelo antes. No usa ni pide la service role.
-2. `sql/06_bitacora_auditoria.sql` — huella SHA-256 de cada foto, bitácora que solo crece, y la verificación de la cadena. **Sin el 04 y el 06 el kiosco nuevo no guarda la checada.**
-3. `sql/07_politica_insert_foto.sql` — corrige la política de subida. Sin este paso Storage rechaza la foto aunque el 04 haya dicho Success.
-4. `sql/05_retencion_fotos_asistencia.sql` — opcional. Solo crea funciones para listar fotos de más de 90 días y, después, limpiar la ruta. **No borra archivos y no queda programado.** El cron de ejemplo está comentado.
+2. `sql/06_bitacora_auditoria.sql` — huella SHA-256 de cada foto, bitácora que solo crece, y la verificación de la cadena.
+3. `sql/07_politica_insert_foto.sql` — corrige la política de subida.
+4. `sql/08_comida_kiosk_attendance.sql` — habilita salida a comer y regreso. Entrada y salida siguen funcionando si este archivo todavía no se corre; los botones de comida avisan y no registran.
+5. `sql/05_retencion_fotos_asistencia.sql` — opcional. Solo crea funciones para listar fotos de más de 90 días y, después, limpiar la ruta. **No borra archivos y no queda programado.** El cron de ejemplo está comentado.
 
 **No corras el paso 3** mientras el kiosko y la admin tengan que seguir con la llave anon y el esquema actual. `sql/03_seguridad_pin_y_admin.sql` queda para más adelante. Si algún día se corre, su `register_attendance` ya pide la foto y la huella.
 
@@ -47,7 +48,7 @@ Los PIN asignados no se republican en este documento. Están en la base y se con
 - Un doble clic, o la misma acción repetida en menos de un minuto, no crea otro renglón. Una salida justo después de una entrada sí se guarda.
 - La app de Render no está en este repo, no manda coordenadas y no manda foto. La columna acepta vacío para no romper ese otro cliente. El aparato de Nanofactor tiene que abrir esta página.
 - La foto guarda también su huella SHA-256 en `photo_sha256`.
-- Publica la página **después** de correr el SQL 4, el 6 y el 7. Si se publica antes, el kiosco explica qué falta y no registra. Si la foto se rechaza con un detalle de Storage, corre `sql/07_politica_insert_foto.sql`.
+- Publica la página cuando quieras: entrada y salida siguen igual si el SQL 8 no se ha corrido. La comida pide ese archivo antes de usarse.
 
 ## Página de admin
 
