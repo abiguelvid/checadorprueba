@@ -148,9 +148,12 @@ DECLARE
   v_sha text;
   v_ts timestamptz;
   v_saved boolean := false;
+  v_last_action text;
+  v_last_ts timestamptz;
+  v_day_start timestamptz;
 BEGIN
   v_action := lower(btrim(coalesce(p_action, '')));
-  IF v_action NOT IN ('checkin', 'checkout') THEN
+  IF v_action NOT IN ('checkin', 'checkout', 'lunch_out', 'lunch_in') THEN
     RAISE EXCEPTION 'Acción no válida';
   END IF;
   IF p_pin IS NULL OR p_pin !~ '^[0-9]{4}$' THEN
@@ -168,17 +171,43 @@ BEGIN
     RAISE EXCEPTION 'PIN no encontrado';
   END IF;
 
-  v_photo := btrim(coalesce(p_photo_path, ''));
-  IF v_photo !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$' THEN
-    RAISE EXCEPTION 'Falta la foto. No se registró la asistencia.';
-  END IF;
-  IF split_part(v_photo, '/', 1) IS DISTINCT FROM v_id::text THEN
-    RAISE EXCEPTION 'La foto no corresponde al empleado. No se registró la asistencia.';
+  IF v_action IN ('checkin', 'checkout') THEN
+    v_photo := btrim(coalesce(p_photo_path, ''));
+    IF v_photo !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9]{4}-[0-9]{2}-[0-9]{2}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$' THEN
+      RAISE EXCEPTION 'Falta la foto. No se registró la asistencia.';
+    END IF;
+    IF split_part(v_photo, '/', 1) IS DISTINCT FROM v_id::text THEN
+      RAISE EXCEPTION 'La foto no corresponde al empleado. No se registró la asistencia.';
+    END IF;
+    v_sha := lower(btrim(coalesce(p_photo_sha256, '')));
+    IF v_sha !~ '^[0-9a-f]{64}$' THEN
+      RAISE EXCEPTION 'Falta la huella de la foto. No se registró la asistencia.';
+    END IF;
+  ELSE
+    v_photo := NULL;
+    v_sha := NULL;
   END IF;
 
-  v_sha := lower(btrim(coalesce(p_photo_sha256, '')));
-  IF v_sha !~ '^[0-9a-f]{64}$' THEN
-    RAISE EXCEPTION 'Falta la huella de la foto. No se registró la asistencia.';
+  SELECT a.action, a."timestamp"
+    INTO v_last_action, v_last_ts
+  FROM public.kiosk_attendance a
+  WHERE a.employee_id = v_id
+  ORDER BY a."timestamp" DESC
+  LIMIT 1;
+
+  v_day_start := date_trunc('day', now() AT TIME ZONE 'America/Mexico_City') AT TIME ZONE 'America/Mexico_City';
+
+  IF v_action = 'lunch_out' THEN
+    IF v_last_action IS NULL OR v_last_action NOT IN ('checkin', 'lunch_in') THEN
+      RAISE EXCEPTION 'No hay una entrada abierta. Marca Entrada antes de salir a comer.';
+    END IF;
+  ELSIF v_action = 'lunch_in' THEN
+    IF v_last_action IS DISTINCT FROM 'lunch_out'
+       OR v_last_ts IS NULL
+       OR v_last_ts < v_day_start
+       OR v_last_ts >= v_day_start + interval '1 day' THEN
+      RAISE EXCEPTION 'No hay una salida a comer de hoy. Marca Salida a comer antes del regreso.';
+    END IF;
   END IF;
 
   IF EXISTS (

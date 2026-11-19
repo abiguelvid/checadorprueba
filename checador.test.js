@@ -622,10 +622,12 @@ test('el error de Storage se muestra con su código', async () => {
 
 test('el kiosco toma la foto antes de registrar y la admin la abre firmada', () => {
   const kiosk = read('kiosk-check-in.html');
+  const mealAt = kiosk.indexOf('async function punchMeal');
   const hashAt = kiosk.indexOf('sha256Hex');
   const uploadAt = kiosk.indexOf('uploadAttendancePhoto');
-  const registerAt = kiosk.indexOf('registerAttendance');
-  assert.equal(hashAt > 0 && hashAt < uploadAt && uploadAt < registerAt, true);
+  const registerAt = kiosk.lastIndexOf('registerAttendance');
+  assert.equal(mealAt > 0 && mealAt < hashAt && hashAt < uploadAt && uploadAt < registerAt, true);
+  assert.equal(kiosk.slice(mealAt, hashAt).includes('sha256Hex'), false);
   assert.match(kiosk, /facingMode:\s*\{\s*ideal:\s*'user'/);
   assert.match(kiosk, /playsinline/);
   assert.match(kiosk, /Checador\.AVISO_FOTO/);
@@ -706,6 +708,80 @@ test('la huella de la foto es SHA-256 y sin ella no se llama a la base', async (
     /huella de la foto/
   );
   assert.equal(calls, 0);
+});
+
+test('la comida no pide foto y respeta la secuencia del día', async () => {
+  const day = [
+    { action: 'checkin', t: 0 },
+    { action: 'lunch_out', t: 4 * 60 * 60 * 1000 },
+    { action: 'lunch_in', t: 5 * 60 * 60 * 1000 },
+    { action: 'checkout', t: 9 * 60 * 60 * 1000 }
+  ];
+  const summary = Checador.summarizeDay(day);
+  assert.equal(summary.lunchMs, 60 * 60 * 1000);
+  assert.equal(summary.siteMs, 8 * 60 * 60 * 1000);
+  assert.equal(summary.siteLabel, '8h 0m');
+  assert.equal(Checador.actionLabel('lunch_out'), 'Salida a comer');
+  assert.equal(Checador.presenceFromAction('lunch_out'), 'lunch');
+  assert.equal(Checador.presenceFromAction('lunch_in'), 'in');
+  assert.equal(Checador.needsPhoto('lunch_out'), false);
+  assert.equal(Checador.needsPhoto('checkin'), true);
+
+  Checador.resetClientState();
+  const posts = [];
+  global.fetch = async (url, options) => {
+    if (url.endsWith('/rpc/verify_pin') || url.endsWith('/rpc/register_attendance')) {
+      return jsonResponse(404, { code: 'PGRST202', message: 'Could not find the function public.register_attendance' });
+    }
+    if (url.includes('kiosk_employees?select=id,name&pin=eq.')) {
+      return jsonResponse(200, [{ id: EMP_A, name: 'PERSONA' }]);
+    }
+    if (url.includes('select=action,timestamp')) {
+      return jsonResponse(200, [{ action: 'checkin', timestamp: new Date().toISOString() }]);
+    }
+    if (options && options.method === 'POST') {
+      posts.push(JSON.parse(options.body));
+      return jsonResponse(201, [{ employee_name: 'PERSONA', action: 'lunch_out', timestamp: new Date().toISOString(), lat: 19.4, lng: -99.1, accuracy: 8 }]);
+    }
+    return jsonResponse(200, []);
+  };
+  const row = await Checador.registerAttendance({ pin: '2465', action: 'lunch_out', location: { lat: 19.4, lng: -99.1, accuracy: 8 } });
+  assert.equal(row.action, 'lunch_out');
+  assert.equal(row.saved_location, true);
+  assert.equal(posts[0].photo_path, undefined);
+  assert.equal(posts[0].action, 'lunch_out');
+
+  global.fetch = async (url) => {
+    if (url.endsWith('/rpc/verify_pin') || url.endsWith('/rpc/register_attendance')) {
+      return jsonResponse(404, { code: 'PGRST202', message: 'Could not find the function public.verify_pin' });
+    }
+    if (url.includes('kiosk_employees?select=id,name&pin=eq.')) {
+      return jsonResponse(200, [{ id: EMP_A, name: 'PERSONA' }]);
+    }
+    if (url.includes('select=action,timestamp')) {
+      return jsonResponse(200, [{ action: 'checkout', timestamp: new Date().toISOString() }]);
+    }
+    return jsonResponse(500, { message: url });
+  };
+  await assert.rejects(
+    () => Checador.registerAttendance({ pin: '2465', action: 'lunch_out', location: null }),
+    /entrada abierta/
+  );
+  await assert.rejects(
+    () => Checador.registerAttendance({ pin: '2465', action: 'lunch_in', location: null }),
+    /salida a comer de hoy/
+  );
+
+  const sql = read('sql/08_comida_kiosk_attendance.sql');
+  assert.match(sql, /lunch_out/);
+  assert.match(sql, /lunch_in/);
+  assert.match(sql, /NOT VALID/);
+  assert.doesNotMatch(sql, /storage\.objects/);
+  assert.match(read('kiosk-check-in.html'), /Salida a comer/);
+  assert.match(read('kiosk-check-in.html'), /Regreso de comer/);
+  assert.equal(read('kiosk-check-in.html').includes('sin foto'), false);
+  assert.match(read('admin-empleados.html'), /recAction/);
+  assert.match(read('external-check-in-dashboard.html'), /Minutos de comida/);
 });
 
 test('la bitácora es append-only, encadena SHA-256 y no se activa sola', () => {

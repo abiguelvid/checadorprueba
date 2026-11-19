@@ -279,28 +279,32 @@ async function loadData() {
     const rows = await Checador.fetchAttendance(empId, dateFrom, dateTo);
 
     // Separar y procesar
-    const ins  = {};   // dayKey → primer checkin del día
-    const outs = {};   // dayKey → último checkout del día
+    const ins  = {};
+    const outs = {};
+    const byDay = {};
 
     rows.forEach(r => {
       const mx  = toMx(r.timestamp);
       const key = dayKey(mx);
       const coords = Checador.readCoords(r) || {};
+      const punch = { action: r.action, t: mx.getTime(), mx, timeStr: fmtTime(mx), ...coords };
+      if (!byDay[key]) byDay[key] = [];
+      byDay[key].push(punch);
       if (r.action === 'checkin') {
         if (!ins[key]) ins[key] = { mx, timeStr: fmtTime(mx), cls: classify(mx), ...coords };
       } else if (r.action === 'checkout') {
-        outs[key] = { mx, timeStr: fmtTime(mx), ...coords };   // sobreescribe → queda el último
+        outs[key] = { mx, timeStr: fmtTime(mx), ...coords };
       }
     });
 
-    // Construir dayMap cruzado
     dayMap = {};
-    const allKeys = new Set([...Object.keys(ins), ...Object.keys(outs)]);
+    const allKeys = new Set([...Object.keys(ins), ...Object.keys(outs), ...Object.keys(byDay)]);
     allKeys.forEach(k => {
       dayMap[k] = {
         inRec:  ins[k]  || null,
         outRec: outs[k] || null,
-        cls:    ins[k]  ? ins[k].cls : 'red'
+        cls:    ins[k]  ? ins[k].cls : 'red',
+        summary: Checador.summarizeDay(byDay[k] || [])
       };
     });
 
@@ -420,6 +424,13 @@ function renderCalendar() {
       }
       timesDiv.appendChild(outDiv);
 
+      if (rec.summary && rec.summary.lunchMs > 0) {
+        const meal = document.createElement('div');
+        meal.className = 'day-time-out';
+        meal.textContent = 'comida ' + rec.summary.lunchLabel;
+        timesDiv.appendChild(meal);
+      }
+
       const mapUrl = Checador.mapsUrl(rec.inRec.lat, rec.inRec.lng)
         || (rec.outRec && Checador.mapsUrl(rec.outRec.lat, rec.outRec.lng));
       if (mapUrl) {
@@ -434,12 +445,17 @@ function renderCalendar() {
       cell.appendChild(timesDiv);
 
       // Tooltip
+      const summary = rec.summary || Checador.summarizeDay([]);
       const durStr = rec.outRec
-        ? calcDur(rec.inRec.mx, rec.outRec.mx)
-        : 'sin salida registrada';
+        ? (summary.siteLabel ? summary.siteLabel + ' en sitio' : calcDur(rec.inRec.mx, rec.outRec.mx))
+        : (summary.openLunch ? 'en comida' : 'sin salida registrada');
+      const mealLine = summary.meals
+        ? `Comida: <b>${summary.lunchLabel}</b>` + (summary.openLunch ? ' · sigue en comida' : '')
+        : '';
       const lines = [
         `Entrada: <b>${rec.inRec.timeStr}</b> MX`,
         `Salida: <b>${rec.outRec ? rec.outRec.timeStr : '—'}</b> MX`,
+        mealLine,
         CLS_LABELS[rec.cls],
         `<span style="color:#aaa;font-size:10px">${durStr}</span>`,
         mapAnchor('Ubicación entrada', rec.inRec),
@@ -506,7 +522,8 @@ function exportCSV() {
   const rows = [[
     'Fecha', 'Día', 'Hora entrada (MX)', 'Hora salida (MX)', 'Tiempo en sitio', 'Estado', 'Empleado',
     'Lat entrada', 'Lng entrada', 'Precisión entrada (m)', 'Mapa entrada',
-    'Lat salida', 'Lng salida', 'Precisión salida (m)', 'Mapa salida'
+    'Lat salida', 'Lng salida', 'Precisión salida (m)', 'Mapa salida',
+    'Salida a comer', 'Regreso de comer', 'Minutos de comida'
   ]];
 
   const iter = new Date(fy, fm - 1, 1);
@@ -523,14 +540,20 @@ function exportCSV() {
         const rec = dayMap[key];
         if (rec && rec.inRec) {
           const outStr = rec.outRec ? rec.outRec.timeStr : '—';
-          const dur    = rec.outRec ? calcDur(rec.inRec.mx, rec.outRec.mx) : '—';
+          const summary = rec.summary || Checador.summarizeDay([]);
+          const dur = rec.outRec
+            ? (summary.siteLabel ? summary.siteLabel + ' en sitio' : calcDur(rec.inRec.mx, rec.outRec.mx))
+            : '—';
+          const mealOut = summary.firstOut ? fmtTime(new Date(summary.firstOut.t)) : '';
+          const mealIn = summary.lastIn ? fmtTime(new Date(summary.lastIn.t)) : '';
           rows.push([
             fechaStr, DAYS_FULL[dow], rec.inRec.timeStr, outStr, dur, CLS_LABELS[rec.cls], empName,
             ...locCells(rec.inRec),
-            ...locCells(rec.outRec)
+            ...locCells(rec.outRec),
+            mealOut, mealIn, String(Math.round(summary.lunchMs / 60000))
           ]);
         } else {
-          rows.push([fechaStr, DAYS_FULL[dow], '—', '—', '—', 'Sin registro', empName, '', '', '', '', '', '', '', '']);
+          rows.push([fechaStr, DAYS_FULL[dow], '—', '—', '—', 'Sin registro', empName, '', '', '', '', '', '', '', '', '', '', '0']);
         }
       }
     }

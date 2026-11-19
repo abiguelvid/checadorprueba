@@ -66,7 +66,7 @@
     tr:last-child td { border-bottom: none; }
     .pin { font-variant-numeric: tabular-nums; letter-spacing: 0.12em; }
     .empty { padding: 28px 12px; color: #888; text-align: center; }
-    .filters { display: grid; grid-template-columns: 1.4fr 0.7fr auto; gap: 10px; align-items: end; }
+    .filters { display: grid; grid-template-columns: 1.2fr 0.8fr 0.9fr auto; gap: 10px; align-items: end; }
     .map-link { color: #27500a; }
     .sin-ubicacion { color: #8c2020; }
     .sin-foto { color: #888; }
@@ -130,6 +130,16 @@
         <div>
           <label for="recDate">Fecha (CDMX)</label>
           <input id="recDate" type="date" />
+        </div>
+        <div>
+          <label for="recAction">Acción</label>
+          <select id="recAction">
+            <option value="">Todas</option>
+            <option value="checkin">Entrada</option>
+            <option value="lunch_out">Salida a comer</option>
+            <option value="lunch_in">Regreso de comer</option>
+            <option value="checkout">Salida</option>
+          </select>
         </div>
         <button class="btn" id="recLoad" type="button">Ver</button>
       </div>
@@ -258,20 +268,24 @@
   }
 
   function renderRecords(rows) {
-    lastRecords = rows || [];
+    if (rows) lastRecords = rows;
+    const actionFilter = $('recAction') ? $('recAction').value : '';
+    const shown = (lastRecords || []).filter(row => !actionFilter || row.action === actionFilter);
     const body = $('recBody');
     body.replaceChildren();
-    if (!rows.length) {
+    if (!shown.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
       td.colSpan = 6;
       td.className = 'empty';
-      td.textContent = 'No hay registros en esa fecha.';
+      td.textContent = actionFilter
+        ? 'No hay registros de esa acción en esa fecha.'
+        : 'No hay registros en esa fecha.';
       tr.appendChild(td);
       body.appendChild(tr);
       return;
     }
-    rows.forEach(row => {
+    shown.forEach(row => {
       const tr = document.createElement('tr');
       const when = document.createElement('td');
       when.textContent = Checador.formatCdmx(row.timestamp);
@@ -575,6 +589,7 @@
   });
   $('filter').addEventListener('input', render);
   $('recLoad').addEventListener('click', loadRecords);
+  $('recAction').addEventListener('change', () => renderRecords());
   $('btnAudit').addEventListener('click', verifyIntegrity);
   $('historyClose').addEventListener('click', closeHistory);
   $('historyOverlay').addEventListener('click', (ev) => {
