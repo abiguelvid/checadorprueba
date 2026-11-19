@@ -99,6 +99,8 @@ REVOKE ALL ON FUNCTION kiosk_internal.attendance_photo_registered(text) FROM PUB
 GRANT EXECUTE ON FUNCTION kiosk_internal.attendance_photo_registered(text) TO anon, authenticated;
 
 DROP POLICY IF EXISTS attendance_photos_insert ON storage.objects;
+-- Dentro del EXISTS, "name" a secas es kiosk_employees.name (el nombre de la
+-- persona), no la ruta del archivo. Hay que escribir storage.objects.name.
 CREATE POLICY attendance_photos_insert
 ON storage.objects
 FOR INSERT
@@ -110,7 +112,7 @@ WITH CHECK (
   AND EXISTS (
     SELECT 1
     FROM public.kiosk_employees AS e
-    WHERE e.id::text = (storage.foldername(name))[1]
+    WHERE e.id::text = (storage.foldername(storage.objects.name))[1]
   )
 );
 
