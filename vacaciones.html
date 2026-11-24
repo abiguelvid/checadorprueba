@@ -76,8 +76,16 @@
     <div class="card section">
       <h2 id="hello">Hola</h2>
       <p class="note" id="managerNote"></p>
+      <p class="note" id="balanceNote"></p>
       <form id="reqForm">
         <div class="form-grid">
+          <div>
+            <label for="kind">Tipo</label>
+            <select id="kind">
+              <option value="vacaciones">Vacaciones</option>
+              <option value="personal">Día personal</option>
+            </select>
+          </div>
           <div>
             <label for="start">Inicio</label>
             <input id="start" type="date" required />
@@ -98,6 +106,7 @@
         <table>
           <thead>
             <tr>
+              <th>Tipo</th>
               <th>Inicio</th>
               <th>Fin</th>
               <th>Nota</th>
@@ -119,9 +128,10 @@
           <thead>
             <tr>
               <th>Persona</th>
+              <th>Tipo</th>
               <th>Inicio</th>
               <th>Fin</th>
-              <th>Nota</th>
+              <th>Saldo</th>
               <th></th>
             </tr>
           </thead>
@@ -137,7 +147,7 @@
     <a href="kiosk-check-in.html">Kiosko</a>
   </div>
 </div>
-<script src="checador.js?v=f82c366723e9"></script>
+<script src="checador.js?v=96426b0879fe"></script>
 <script>
   const $ = id => document.getElementById(id);
   let pin = '';
@@ -150,6 +160,8 @@
 
   function render() {
     $('hello').textContent = 'Hola, ' + (portal.name || '');
+    $('balanceNote').textContent = Checador.describeBalance(portal.balance)
+      || 'El saldo aparece cuando la base ya tiene el paso 14.';
     $('managerNote').textContent = portal.manager_name
       ? 'Tu manager es ' + portal.manager_name + '. Primero aprueba esa persona y después RH. Hasta que las dos aprueben, estos días siguen contando como falta.'
       : 'Todavía no tienes manager asignado. Puedes enviar la solicitud: queda esperando. Nadie puede dar el primer visto bueno hasta que RH asigne a tu manager en la admin. RH no la aprueba saltándose ese paso.';
@@ -160,7 +172,7 @@
     if (!rows.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 5;
+      td.colSpan = 6;
       td.className = 'empty';
       td.textContent = 'No tienes solicitudes.';
       tr.appendChild(td);
@@ -168,6 +180,8 @@
     } else {
       rows.forEach(row => {
         const tr = document.createElement('tr');
+        const kind = document.createElement('td');
+        kind.textContent = row.request_type === 'personal' ? 'Día personal' : 'Vacaciones';
         const start = document.createElement('td');
         start.textContent = Checador.formatYmd(row.start_date);
         const end = document.createElement('td');
@@ -190,7 +204,7 @@
           cancel.addEventListener('click', () => cancelRequest(row));
           actions.appendChild(cancel);
         }
-        tr.append(start, end, note, state, actions);
+        tr.append(kind, start, end, note, state, actions);
         mine.appendChild(tr);
       });
     }
@@ -202,7 +216,7 @@
     if (!team.length && portal.direct_reports > 0) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 5;
+      td.colSpan = 6;
       td.className = 'empty';
       td.textContent = 'Nadie de tu equipo tiene una solicitud esperándote.';
       tr.appendChild(td);
@@ -212,12 +226,14 @@
       const tr = document.createElement('tr');
       const who = document.createElement('td');
       who.textContent = row.employee_name || '—';
+      const kind = document.createElement('td');
+      kind.textContent = row.request_type === 'personal' ? 'Día personal' : 'Vacaciones';
       const start = document.createElement('td');
       start.textContent = Checador.formatYmd(row.start_date);
       const end = document.createElement('td');
       end.textContent = Checador.formatYmd(row.end_date);
       const note = document.createElement('td');
-      note.textContent = row.note || '—';
+      note.textContent = Checador.describeBalance(row.balance) || '—';
       const actions = document.createElement('td');
       actions.className = 'row-actions';
       const ok = document.createElement('button');
@@ -231,7 +247,7 @@
       no.textContent = 'Rechazar';
       no.addEventListener('click', () => decide(row, 'rejected'));
       actions.append(ok, no);
-      tr.append(who, start, end, note, actions);
+      tr.append(who, kind, start, end, note, actions);
       body.appendChild(tr);
     });
   }
@@ -300,7 +316,8 @@
       await Checador.vacationRequestCreate(pin, {
         start_date: $('start').value,
         end_date: $('end').value,
-        note: $('note').value
+        note: $('note').value,
+        request_type: $('kind').value
       });
       $('start').value = '';
       $('end').value = '';

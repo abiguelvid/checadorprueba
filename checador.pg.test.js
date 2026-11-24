@@ -319,3 +319,102 @@ test('la bitácora acepta solicitudes y festivos después del SQL 13', { skip: h
   `]);
   assert.equal(check.trim(), 'true|true');
 });
+
+test('el saldo LFT y los dias personales se aplican en el servidor', { skip: hasLocalPostgres() ? false : 'no hay Postgres local' }, () => {
+  const db = 'checador_saldo_test';
+  psql('postgres', ['-c', `DROP DATABASE IF EXISTS ${db}`]);
+  psql('postgres', ['-c', `CREATE DATABASE ${db}`]);
+  psql(db, ['-c', `
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        CREATE ROLE anon NOLOGIN;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        CREATE ROLE authenticated NOLOGIN;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+        CREATE ROLE service_role NOLOGIN;
+      END IF;
+    END $$;
+    CREATE TABLE public.kiosk_employees (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      name text NOT NULL,
+      pin text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    INSERT INTO public.kiosk_employees (id, name, pin) VALUES
+      ('${LEON}', 'LEON ALBARRAN MENA', '1111'),
+      ('${ABRAHAM}', 'ABRAHAM DEL RIO', '2222');
+  `]);
+  psqlFile(db, path.join(__dirname, 'sql/10_festivos_y_vacaciones.sql'));
+  psqlFile(db, path.join(__dirname, 'sql/14_saldo_vacaciones_y_dias_personales.sql'));
+
+  const scale = psql(db, ['-tAc', `
+    SELECT kiosk_internal.lft_vacation_days(1)
+      || '|' || kiosk_internal.lft_vacation_days(2)
+      || '|' || kiosk_internal.lft_vacation_days(5)
+      || '|' || kiosk_internal.lft_vacation_days(6)
+      || '|' || kiosk_internal.lft_vacation_days(10)
+      || '|' || kiosk_internal.lft_vacation_days(11)
+      || '|' || kiosk_internal.lft_vacation_days(31)
+      || '|' || kiosk_internal.lft_vacation_days(0)
+  `]).trim();
+  assert.equal(scale, '12|14|20|22|22|24|32|0');
+
+  function fails(sql) {
+    try {
+      psql(db, ['-c', sql]);
+      return '';
+    } catch (err) {
+      return String(err.stderr || err.stdout || err.message);
+    }
+  }
+
+  assert.match(
+    fails(`SELECT public.vacation_request_create('2222', DATE '2026-12-15', DATE '2026-12-17', 'puente', 'vacaciones')`),
+    /fecha de ingreso/
+  );
+  assert.match(
+    fails(`SELECT public.admin_save_vacation('nfg-rh', NULL, '${ABRAHAM}', DATE '2026-12-15', DATE '2026-12-17', 'directa', 'vacaciones', true)`),
+    /fecha de ingreso/
+  );
+
+  psql(db, ['-c', `SELECT public.admin_set_fecha_ingreso('nfg-rh', '${ABRAHAM}', DATE '2020-01-15')`]);
+  const created = psql(db, ['-tAc', `
+    SELECT status FROM public.vacation_request_create('2222', DATE '2026-12-15', DATE '2026-12-17', 'puente', 'vacaciones')
+  `]).trim();
+  assert.equal(created, 'pending_manager');
+
+  assert.match(
+    fails(`SELECT public.vacation_request_create('2222', DATE '2026-11-16', DATE '2026-12-14', 'de mas', 'vacaciones')`),
+    /saldo no alcanza/
+  );
+
+  const personal = psql(db, ['-tAc', `
+    SELECT status FROM public.vacation_request_create('2222', DATE '2026-10-01', DATE '2026-10-02', 'tramite', 'personal')
+  `]).trim();
+  assert.equal(personal, 'pending_manager');
+  assert.match(
+    fails(`SELECT public.vacation_request_create('2222', DATE '2026-10-05', DATE '2026-10-05', 'otro', 'personal')`),
+    /2 días personales/
+  );
+  assert.match(
+    fails(`SELECT public.vacation_request_create('2222', DATE '2026-12-14', DATE '2026-12-14', 'pegado', 'personal')`),
+    /no puede pegarse/
+  );
+
+  const forced = psql(db, ['-tAc', `
+    SELECT status FROM public.admin_save_vacation(
+      'nfg-rh', NULL, '${ABRAHAM}', DATE '2026-11-16', DATE '2026-12-14', 'exceso', 'vacaciones', true
+    )
+  `]).trim();
+  assert.equal(forced, 'approved');
+  assert.match(
+    fails(`SELECT public.admin_save_vacation('nfg-rh', NULL, '${ABRAHAM}', DATE '2026-10-05', DATE '2026-10-07', 'no', 'personal', true)`),
+    /2 días personales/
+  );
+
+  const stillThere = psql(db, ['-tAc', `SELECT count(*) FROM public.kiosk_vacation_requests WHERE status <> 'cancelled'`]);
+  assert.ok(Number(stillThere) >= 3);
+});

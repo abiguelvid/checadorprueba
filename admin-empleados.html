@@ -225,6 +225,13 @@
               <select id="vacEmp" required></select>
             </div>
             <div>
+              <label for="vacKind">Tipo</label>
+              <select id="vacKind">
+                <option value="vacaciones">Vacaciones</option>
+                <option value="personal">Día personal</option>
+              </select>
+            </div>
+            <div>
               <label for="vacStart">Inicio</label>
               <input id="vacStart" type="date" required />
             </div>
@@ -238,6 +245,11 @@
             </div>
             <button class="btn" id="btnVacSave" type="submit">Cargar ya aprobadas</button>
           </div>
+          <p class="note" id="vacBalance"></p>
+          <label class="note" for="vacForce">
+            <input id="vacForce" type="checkbox" />
+            Cargar aunque rebase el saldo de vacaciones. No quita la fecha de ingreso, el periodo vigente, los días personales ni los empalmes. Queda anotado como excepción de RH.
+          </label>
           <div class="suggest">
             <button class="btn btn-outline" id="vacCancel" type="button" hidden>Cancelar edición</button>
           </div>
@@ -256,6 +268,7 @@
             <thead>
               <tr>
                 <th>Empleado</th>
+                <th>Tipo</th>
                 <th>Inicio</th>
                 <th>Fin</th>
                 <th>Nota</th>
@@ -302,6 +315,7 @@
           <th>Nombre</th>
           <th>PIN</th>
           <th>Alta</th>
+          <th>Ingreso</th>
           <th>Manager</th>
           <th></th>
         </tr>
@@ -329,7 +343,7 @@
   </div>
 </div>
 
-<script src="checador.js?v=f82c366723e9"></script>
+<script src="checador.js?v=96426b0879fe"></script>
 <script>
   const $ = id => document.getElementById(id);
   let accessCode = '';
@@ -341,6 +355,7 @@
   let holidayEditId = null;
   let vacationEditId = null;
   let managerOf = {};
+  let hireDateOf = {};
 
   function setStatus(el, msg, type) {
     el.textContent = msg || '';
@@ -415,7 +430,7 @@
   }
 
   function setDiasEnabled(on) {
-    ['holDate', 'holName', 'holYear', 'btnHolSave', 'btnHolSuggest', 'vacEmp', 'vacStart', 'vacEnd', 'vacNote', 'btnVacSave', 'vacFilter'].forEach(id => {
+    ['holDate', 'holName', 'holYear', 'btnHolSave', 'btnHolSuggest', 'vacEmp', 'vacKind', 'vacStart', 'vacEnd', 'vacNote', 'vacForce', 'btnVacSave', 'vacFilter'].forEach(id => {
       if ($(id)) $(id).disabled = !on;
     });
   }
@@ -434,6 +449,8 @@
     $('vacStart').value = '';
     $('vacEnd').value = '';
     $('vacNote').value = '';
+    $('vacKind').value = 'vacaciones';
+    $('vacForce').checked = false;
     $('btnVacSave').textContent = 'Cargar ya aprobadas';
     $('vacCancel').hidden = true;
     renderVacations();
@@ -492,7 +509,7 @@
     if (!rows.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 6;
+      td.colSpan = 7;
       td.className = 'empty';
       td.textContent = vacations.length
         ? 'Nadie de ese filtro tiene vacaciones.'
@@ -506,6 +523,8 @@
       if (row.id === vacationEditId) tr.className = 'editing';
       const who = document.createElement('td');
       who.textContent = row.employee_name || employeeName(row.employee_id);
+      const kind = document.createElement('td');
+      kind.textContent = row.request_type === 'personal' ? 'Día personal' : 'Vacaciones';
       const start = document.createElement('td');
       start.textContent = Checador.formatYmd(row.start_date);
       const end = document.createElement('td');
@@ -554,7 +573,7 @@
       hist.textContent = 'Historial';
       hist.addEventListener('click', () => showHistory('kiosk_vacation_requests', row.id, (row.employee_name || 'Vacaciones') + ' · ' + Checador.formatYmd(row.start_date)));
       actions.appendChild(hist);
-      tr.append(who, start, end, note, state, actions);
+      tr.append(who, kind, start, end, note, state, actions);
       body.appendChild(tr);
     });
   }
@@ -577,8 +596,11 @@
     $('vacStart').value = String(row.start_date || '').slice(0, 10);
     $('vacEnd').value = String(row.end_date || '').slice(0, 10);
     $('vacNote').value = row.note || '';
+    $('vacKind').value = row.request_type === 'personal' ? 'personal' : 'vacaciones';
+    $('vacForce').checked = false;
     $('btnVacSave').textContent = 'Guardar cambios';
     $('vacCancel').hidden = false;
+    showVacationBalance(row.employee_id);
     renderVacations();
   }
 
@@ -588,7 +610,11 @@
       vacations = await Checador.adminListVacations(accessCode) || [];
       const mgrRows = await Checador.adminListManagers(accessCode) || [];
       managerOf = {};
-      mgrRows.forEach(row => { managerOf[row.id] = row.manager_id || ''; });
+      hireDateOf = {};
+      mgrRows.forEach(row => {
+        managerOf[row.id] = row.manager_id || '';
+        hireDateOf[row.id] = row.fecha_ingreso ? String(row.fecha_ingreso).slice(0, 10) : '';
+      });
       render();
       diasReady = true;
       $('diasSchema').hidden = true;
@@ -624,6 +650,39 @@
       setStatus($('holStatus'), 'Se borró el festivo.', 'ok');
     } catch (err) {
       setStatus($('holStatus'), err.message, 'error');
+    }
+  }
+
+  async function saveHireDate(row, input) {
+    const previous = hireDateOf[row.id] || '';
+    setStatus($('appStatus'), 'Guardando fecha de ingreso…');
+    try {
+      await Checador.adminSetHireDate(accessCode, row.id, input.value || null);
+      hireDateOf[row.id] = input.value || '';
+      setStatus($('appStatus'), input.value
+        ? 'Fecha de ingreso de ' + (row.name || 'la persona') + ' guardada.'
+        : 'Se quitó la fecha de ingreso de ' + (row.name || 'la persona') + '. Sin ella no se pueden pedir vacaciones.', 'ok');
+      render();
+      if ($('vacEmp').value === row.id) showVacationBalance(row.id);
+    } catch (err) {
+      input.value = previous;
+      setStatus($('appStatus'), err.message, 'error');
+    }
+  }
+
+  async function showVacationBalance(employeeId) {
+    const box = $('vacBalance');
+    if (!box) return;
+    if (!employeeId) {
+      box.textContent = '';
+      return;
+    }
+    try {
+      const balance = await Checador.adminEmployeeBalance(accessCode, employeeId);
+      const text = Checador.describeBalance(balance);
+      box.textContent = text || 'Sin saldo.';
+    } catch (err) {
+      box.textContent = err.message;
     }
   }
 
@@ -918,7 +977,7 @@
     if (!rows.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 5;
+      td.colSpan = 6;
       td.className = 'empty';
       td.textContent = employees.length ? 'Nadie coincide con la búsqueda.' : 'No hay empleados.';
       tr.appendChild(td);
@@ -935,6 +994,19 @@
       pin.textContent = Checador.padPin(row.pin) || '—';
       const alta = document.createElement('td');
       alta.textContent = fmtAlta(row.created_at);
+      const ingreso = document.createElement('td');
+      const hire = document.createElement('input');
+      hire.type = 'date';
+      hire.value = hireDateOf[row.id] || '';
+      hire.title = hire.value ? 'Fecha de ingreso' : 'Sin fecha de ingreso no hay saldo de vacaciones';
+      hire.addEventListener('change', () => saveHireDate(row, hire));
+      ingreso.appendChild(hire);
+      if (!hire.value) {
+        const warn = document.createElement('div');
+        warn.className = 'note';
+        warn.textContent = 'Falta la fecha de ingreso';
+        ingreso.appendChild(warn);
+      }
       const mgr = document.createElement('td');
       const sel = document.createElement('select');
       const none = document.createElement('option');
@@ -967,7 +1039,7 @@
       btn.textContent = 'Borrar';
       btn.addEventListener('click', () => removeEmployee(row));
       actions.append(hist, btn);
-      tr.append(name, pin, alta, mgr, actions);
+      tr.append(name, pin, alta, ingreso, mgr, actions);
       body.appendChild(tr);
     });
   }
@@ -1103,6 +1175,13 @@
     $('btnVacSave').disabled = true;
     setStatus($('vacStatus'), 'Guardando…');
     try {
+      if ($('vacForce').checked && $('vacKind').value === 'vacaciones') {
+        const typed = window.confirm('Esta carga puede pasar el saldo de vacaciones. Queda anotada como excepción de RH. ¿Continuar?');
+        if (!typed) {
+          setStatus($('vacStatus'), '');
+          return;
+        }
+      }
       const clean = Checador.validateVacation({
         id: vacationEditId,
         employee_id: $('vacEmp').value,
@@ -1110,6 +1189,8 @@
         end_date: $('vacEnd').value,
         note: $('vacNote').value
       });
+      clean.request_type = $('vacKind').value === 'personal' ? 'personal' : 'vacaciones';
+      clean.forzar = $('vacForce').checked && clean.request_type === 'vacaciones';
       const clash = vacations.some(row => row.id !== clean.id
         && row.employee_id === clean.employee_id
         && Checador.vacationBlocksOverlap(row.status)
@@ -1135,6 +1216,7 @@
     setStatus($('vacStatus'), '');
   });
   $('vacFilter').addEventListener('change', renderVacations);
+  $('vacEmp').addEventListener('change', () => showVacationBalance($('vacEmp').value));
 
   $('btnLogout').addEventListener('click', () => {
     forget();
