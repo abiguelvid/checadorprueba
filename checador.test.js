@@ -803,3 +803,201 @@ test('la bitácora es append-only, encadena SHA-256 y no se activa sola', () => 
   assert.equal(/^\s*select\s+cron\.schedule/im.test(sql), false);
   assert.match(sql, /p_photo_sha256/);
 });
+
+test('los festivos de la LFT y las vacaciones no cuentan como falta', () => {
+  const y2024 = Checador.statutoryHolidaysMx(2024).map(row => row.holiday_date + ' ' + row.name);
+  assert.deepEqual(y2024, [
+    '2024-01-01 Año Nuevo',
+    '2024-02-05 Día de la Constitución',
+    '2024-03-18 Natalicio de Benito Juárez',
+    '2024-05-01 Día del Trabajo',
+    '2024-09-16 Día de la Independencia',
+    '2024-11-18 Día de la Revolución',
+    '2024-12-01 Transmisión del Poder Ejecutivo Federal',
+    '2024-12-25 Navidad'
+  ]);
+  const y2026 = Checador.statutoryHolidaysMx(2026);
+  assert.deepEqual(y2026.map(row => row.holiday_date), [
+    '2026-01-01',
+    '2026-02-02',
+    '2026-03-16',
+    '2026-05-01',
+    '2026-09-16',
+    '2026-11-16',
+    '2026-12-25'
+  ]);
+  assert.equal(y2026.some(row => row.holiday_date === '2026-12-01'), false);
+  assert.throws(() => Checador.statutoryHolidaysMx(1999), /2000 y 2100/);
+
+  const holidays = Checador.indexHolidays([
+    { holiday_date: '2026-11-16', name: 'Día de la Revolución' },
+    { holiday_date: '2026-12-25T00:00:00', name: '  Navidad  ' }
+  ]);
+  assert.equal(holidays['2026-12-25'], 'Navidad');
+  const vacations = Checador.normalizeVacations([
+    { employee_id: EMP_A, start_date: '2026-11-18', end_date: '2026-11-19', note: ' puente ' }
+  ]);
+  assert.equal(Checador.excuseForDay('2026-11-16', holidays, vacations).kind, 'festivo');
+  assert.equal(Checador.excuseForDay('2026-11-18', holidays, vacations).kind, 'vacaciones');
+  assert.equal(Checador.excuseForDay('2026-11-16', holidays, [
+    { start_date: '2026-11-16', end_date: '2026-11-16' }
+  ]).kind, 'festivo');
+
+  const summary = Checador.summarizePeriod({
+    fromYmd: '2026-11-16',
+    toYmd: '2026-11-20',
+    todayYmd: '2026-11-24',
+    holidaysByDate: holidays,
+    vacations: vacations,
+    entries: [
+      { ymd: '2026-11-16', cls: 'green' },
+      { ymd: '2026-11-17', cls: 'green' },
+      { ymd: '2026-11-20', cls: 'red' }
+    ]
+  });
+  assert.equal(summary.expected, 2);
+  assert.equal(summary.absences, 0);
+  assert.equal(summary.holidayDays, 1);
+  assert.equal(summary.vacationDays, 2);
+  assert.equal(summary.green, 1);
+  assert.equal(summary.red, 1);
+  assert.equal(summary.faltaOTarde, 1);
+  assert.equal(summary.registered, 3);
+  assert.equal(summary.punctuality, 50);
+
+  const plain = Checador.summarizePeriod({
+    fromYmd: '2026-11-16',
+    toYmd: '2026-11-20',
+    todayYmd: '2026-11-20',
+    holidaysByDate: {},
+    vacations: [],
+    entries: [
+      { ymd: '2026-11-16', cls: 'green' },
+      { ymd: '2026-11-17', cls: 'green' },
+      { ymd: '2026-11-18', cls: 'yellow' },
+      { ymd: '2026-11-19', cls: 'green' },
+      { ymd: '2026-11-20', cls: 'red' }
+    ]
+  });
+  assert.equal(plain.expected, 5);
+  assert.equal(plain.absences, 0);
+  assert.equal(plain.faltaOTarde, 1);
+  assert.equal(plain.punctuality, 60);
+
+  assert.equal(Checador.rangesOverlap('2026-12-01', '2026-12-05', '2026-12-05', '2026-12-06'), true);
+  assert.equal(Checador.rangesOverlap('2026-12-01', '2026-12-05', '2026-12-06', '2026-12-08'), false);
+  assert.throws(() => Checador.validateVacation({
+    employee_id: EMP_A,
+    start_date: '2026-12-10',
+    end_date: '2026-12-01'
+  }), /anterior/);
+  assert.throws(() => Checador.validateHoliday({ holiday_date: '2026-12-25', name: 'N' }), /2 y 80/);
+  const saved = Checador.validateVacation({
+    employee_id: EMP_A,
+    start_date: '2026-12-21',
+    end_date: '2026-12-23',
+    note: '  fin de año  '
+  });
+  assert.equal(saved.note, 'fin de año');
+  assert.equal(Checador.formatYmd('2026-12-25'), '25/12/2026');
+});
+
+test('festivos y vacaciones se guardan con el código de admin y el tablero los lee', async () => {
+  Checador.resetClientState();
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, body: options && options.body ? JSON.parse(options.body) : null });
+    if (url.endsWith('/rpc/admin_list_holidays')) {
+      return jsonResponse(200, [{ id: 'h1', holiday_date: '2026-12-25', name: 'Navidad' }]);
+    }
+    if (url.endsWith('/rpc/admin_save_holiday')) {
+      return jsonResponse(200, [{ id: 'h1', holiday_date: '2026-12-25', name: 'Navidad' }]);
+    }
+    if (url.endsWith('/rpc/admin_save_vacation')) {
+      return jsonResponse(200, [{ id: 'v1', employee_id: EMP_A, start_date: '2026-12-21', end_date: '2026-12-23', note: null }]);
+    }
+    if (url.includes('/kiosk_holidays?')) {
+      return jsonResponse(404, { code: 'PGRST205', message: "Could not find the table 'public.kiosk_holidays' in the schema cache" });
+    }
+    return jsonResponse(500, { message: url });
+  };
+
+  const listed = await Checador.adminListHolidays('nfg-rh');
+  assert.equal(listed[0].name, 'Navidad');
+  await Checador.adminSaveHoliday('nfg-rh', { holiday_date: '2026-12-25', name: 'Navidad' });
+  assert.deepEqual(calls[1].body, { p_code: 'nfg-rh', p_id: null, p_date: '2026-12-25', p_name: 'Navidad' });
+  await Checador.adminSaveVacation('nfg-rh', {
+    employee_id: EMP_A,
+    start_date: '2026-12-21',
+    end_date: '2026-12-23',
+    note: ''
+  });
+  assert.equal(calls[2].body.p_employee_id, EMP_A);
+  assert.equal(calls[2].body.p_note, null);
+  const missing = await Checador.listExcusedCalendar(EMP_A, '2026-12-01', '2026-12-31');
+  assert.equal(missing.available, false);
+  assert.deepEqual(missing.holidays, []);
+
+  global.fetch = async (url) => {
+    if (url.includes('/kiosk_holidays?')) {
+      return jsonResponse(200, [{ holiday_date: '2026-12-25', name: 'Navidad' }]);
+    }
+    if (url.includes('/kiosk_vacations?')) {
+      assert.equal(url.includes('note'), false);
+      assert.match(url, new RegExp('employee_id=eq.' + EMP_A));
+      return jsonResponse(200, [{ employee_id: EMP_A, start_date: '2026-12-21', end_date: '2026-12-23' }]);
+    }
+    return jsonResponse(500, { message: url });
+  };
+  const found = await Checador.listExcusedCalendar(EMP_A, '2026-12-01', '2026-12-31');
+  assert.equal(found.available, true);
+  assert.equal(found.holidays[0].name, 'Navidad');
+  assert.equal(Checador.excuseForDay('2026-12-22', Checador.indexHolidays(found.holidays), Checador.normalizeVacations(found.vacations)).kind, 'vacaciones');
+
+  global.fetch = async () => jsonResponse(404, {
+    code: 'PGRST202',
+    message: 'Could not find the function public.admin_list_holidays'
+  });
+  await assert.rejects(() => Checador.adminListHolidays('nfg-rh'), /09_festivos_y_vacaciones/);
+
+  const sql = stripSqlComments(read('sql/09_festivos_y_vacaciones.sql'));
+  assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(sql, /kiosk_holidays_select/);
+  assert.match(sql, /kiosk_vacations_select/);
+  assert.match(sql, /FOR SELECT/);
+  assert.match(sql, /TO anon, authenticated/);
+  assert.match(sql, /kiosk_internal\.admin_code_ok/);
+  assert.match(sql, /admin_save_holiday/);
+  assert.match(sql, /admin_save_vacation/);
+  assert.match(sql, /admin_delete_holiday/);
+  assert.match(sql, /admin_delete_vacation/);
+  assert.match(sql, /security_invoker = true/);
+  assert.match(sql, /kiosk_day_status/);
+  assert.doesNotMatch(sql, /FOR\s+INSERT/i);
+  assert.doesNotMatch(sql, /FOR\s+UPDATE/i);
+  assert.doesNotMatch(sql, /FOR\s+DELETE/i);
+  assert.doesNotMatch(sql, /FOR\s+ALL/i);
+  assert.doesNotMatch(sql, /GRANT\s+(INSERT|UPDATE|DELETE|ALL)/i);
+  assert.doesNotMatch(sql, /GRANT SELECT\s*\([^)]*\bnote\b/i);
+  assert.doesNotMatch(sql, /register_attendance/);
+  assert.match(read('sql/09_festivos_y_vacaciones.sql'), /No se precargan días/);
+  assert.equal(/^\s*select\s+cron\.schedule/im.test(sql), false);
+
+  const admin = read('admin-empleados.html');
+  const kiosk = read('kiosk-check-in.html');
+  const board = read('external-check-in-dashboard.html');
+  assert.ok(admin.indexOf('id="gate"') < admin.indexOf('id="app"'));
+  assert.ok(admin.indexOf('id="app"') < admin.indexOf('id="diasCard"'));
+  assert.match(admin, /Agregar festivo/);
+  assert.match(admin, /Agregar vacaciones/);
+  assert.match(admin, /Agregar descanso obligatorio de ese año/);
+  assert.match(admin, /adminSaveHoliday/);
+  assert.match(admin, /adminSaveVacation/);
+  assert.equal(kiosk.includes('diasCard'), false);
+  assert.equal(kiosk.includes('Agregar festivo'), false);
+  assert.equal(kiosk.includes('kiosk_holidays'), false);
+  assert.match(board, /listExcusedCalendar/);
+  assert.match(board, /summarizePeriod/);
+  assert.match(board, /No cuenta como falta/);
+  assert.match(read('README-checador.md'), /sql\/09_festivos_y_vacaciones\.sql/);
+});

@@ -1086,6 +1086,374 @@
     }
   }
 
+  function isYmd(value) {
+    const text = String(value || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+    const parts = text.split('-').map(Number);
+    const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+    return dt.getUTCFullYear() === parts[0]
+      && dt.getUTCMonth() === parts[1] - 1
+      && dt.getUTCDate() === parts[2];
+  }
+
+  function formatYmd(value) {
+    const text = String(value || '').slice(0, 10);
+    if (!isYmd(text)) return '—';
+    const parts = text.split('-');
+    return parts[2] + '/' + parts[1] + '/' + parts[0];
+  }
+
+  function weekdayIndex(ymd) {
+    const text = String(ymd || '').slice(0, 10);
+    if (!isYmd(text)) return null;
+    const parts = text.split('-').map(Number);
+    return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2])).getUTCDay();
+  }
+
+  function daysInclusive(start, end) {
+    if (!isYmd(start) || !isYmd(end) || end < start) return null;
+    const a = start.split('-').map(Number);
+    const b = end.split('-').map(Number);
+    const from = Date.UTC(a[0], a[1] - 1, a[2]);
+    const to = Date.UTC(b[0], b[1] - 1, b[2]);
+    return Math.round((to - from) / 86400000) + 1;
+  }
+
+  function eachYmd(from, to, fn) {
+    if (!isYmd(from) || !isYmd(to) || from > to) return;
+    const parts = from.split('-').map(Number);
+    const cursor = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+    let guard = 0;
+    while (guard < 4000) {
+      const ymd = cursor.toISOString().slice(0, 10);
+      if (ymd > to) return;
+      fn(ymd);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+      guard += 1;
+    }
+  }
+
+  function nthWeekday(year, monthIndex, weekday, n) {
+    const firstDow = new Date(Date.UTC(year, monthIndex, 1)).getUTCDay();
+    const day = 1 + ((weekday - firstDow + 7) % 7) + (n - 1) * 7;
+    return new Date(Date.UTC(year, monthIndex, day)).toISOString().slice(0, 10);
+  }
+
+  function statutoryHolidaysMx(year) {
+    const y = Number(year);
+    if (!Number.isInteger(y) || y < 2000 || y > 2100) {
+      throw new Error('Elige un año entre 2000 y 2100');
+    }
+    const rows = [
+      { holiday_date: y + '-01-01', name: 'Año Nuevo' },
+      { holiday_date: nthWeekday(y, 1, 1, 1), name: 'Día de la Constitución' },
+      { holiday_date: nthWeekday(y, 2, 1, 3), name: 'Natalicio de Benito Juárez' },
+      { holiday_date: y + '-05-01', name: 'Día del Trabajo' },
+      { holiday_date: y + '-09-16', name: 'Día de la Independencia' },
+      { holiday_date: nthWeekday(y, 10, 1, 3), name: 'Día de la Revolución' },
+      { holiday_date: y + '-12-25', name: 'Navidad' }
+    ];
+    if ((y - 2018) % 6 === 0) {
+      rows.push({
+        holiday_date: y + '-12-01',
+        name: 'Transmisión del Poder Ejecutivo Federal'
+      });
+    }
+    rows.sort(function (a, b) {
+      return a.holiday_date < b.holiday_date ? -1 : 1;
+    });
+    return rows;
+  }
+
+  function indexHolidays(rows) {
+    const map = {};
+    (rows || []).forEach(function (row) {
+      const date = String(row && (row.holiday_date || row.day) || '').slice(0, 10);
+      const name = normalizeName(row && (row.name || row.label));
+      if (isYmd(date) && name) map[date] = name;
+    });
+    return map;
+  }
+
+  function normalizeVacations(rows) {
+    return (rows || []).map(function (row) {
+      return {
+        id: row && row.id || null,
+        employee_id: row && row.employee_id || null,
+        start_date: String(row && row.start_date || '').slice(0, 10),
+        end_date: String(row && row.end_date || '').slice(0, 10),
+        note: row && row.note ? normalizeName(row.note) : ''
+      };
+    }).filter(function (row) {
+      return isYmd(row.start_date) && isYmd(row.end_date) && row.start_date <= row.end_date;
+    });
+  }
+
+  function excuseForDay(ymd, holidaysByDate, vacations) {
+    const text = String(ymd || '').slice(0, 10);
+    if (!isYmd(text)) return null;
+    const holidayName = holidaysByDate && holidaysByDate[text];
+    if (holidayName) return { kind: 'festivo', label: holidayName };
+    const hit = (vacations || []).find(function (row) {
+      return text >= row.start_date && text <= row.end_date;
+    });
+    if (hit) return { kind: 'vacaciones', label: 'Vacaciones' };
+    return null;
+  }
+
+  function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+    return aStart <= bEnd && bStart <= aEnd;
+  }
+
+  function tallyAttendance(opts) {
+    const src = opts || {};
+    const holidays = src.holidaysByDate || {};
+    const vacations = src.vacations || [];
+    const checkins = new Set((src.checkinYmds || []).map(function (ymd) {
+      return String(ymd || '').slice(0, 10);
+    }).filter(isYmd));
+    const today = String(src.todayYmd || '').slice(0, 10);
+    let expected = 0;
+    let present = 0;
+    let holidayDays = 0;
+    let vacationDays = 0;
+    if (!isYmd(src.fromYmd) || !isYmd(src.toYmd) || !isYmd(today)) {
+      return { expected: 0, present: 0, absences: 0, holidayDays: 0, vacationDays: 0 };
+    }
+    eachYmd(src.fromYmd, src.toYmd, function (ymd) {
+      if (ymd > today) return;
+      const dow = weekdayIndex(ymd);
+      if (dow === 0 || dow === 6) return;
+      const excuse = excuseForDay(ymd, holidays, vacations);
+      if (excuse) {
+        if (excuse.kind === 'festivo') holidayDays += 1;
+        else vacationDays += 1;
+        return;
+      }
+      expected += 1;
+      if (checkins.has(ymd)) present += 1;
+    });
+    return {
+      expected: expected,
+      present: present,
+      absences: Math.max(0, expected - present),
+      holidayDays: holidayDays,
+      vacationDays: vacationDays
+    };
+  }
+
+  function summarizePeriod(opts) {
+    const src = opts || {};
+    const entries = src.entries || [];
+    const holidays = src.holidaysByDate || {};
+    const vacations = src.vacations || [];
+    const tally = tallyAttendance({
+      fromYmd: src.fromYmd,
+      toYmd: src.toYmd,
+      todayYmd: src.todayYmd,
+      holidaysByDate: holidays,
+      vacations: vacations,
+      checkinYmds: entries.map(function (entry) { return entry && entry.ymd; })
+    });
+    let green = 0;
+    let yellow = 0;
+    let red = 0;
+    let registered = 0;
+    entries.forEach(function (entry) {
+      if (!entry || !isYmd(entry.ymd)) return;
+      registered += 1;
+      if (excuseForDay(entry.ymd, holidays, vacations)) return;
+      if (entry.cls === 'green') green += 1;
+      else if (entry.cls === 'yellow') yellow += 1;
+      else red += 1;
+    });
+    return {
+      registered: registered,
+      green: green,
+      yellow: yellow,
+      red: red,
+      absences: tally.absences,
+      faltaOTarde: red + tally.absences,
+      expected: tally.expected,
+      punctuality: tally.expected > 0 ? Math.round((green / tally.expected) * 100) : 0,
+      holidayDays: tally.holidayDays,
+      vacationDays: tally.vacationDays
+    };
+  }
+
+  function assertYmdInRange(value, emptyMessage) {
+    const text = String(value || '').slice(0, 10);
+    if (!isYmd(text)) throw new Error(emptyMessage || 'Fecha inválida');
+    const year = Number(text.slice(0, 4));
+    if (year < 2000 || year > 2100) throw new Error('La fecha tiene que estar entre 2000 y 2100');
+    return text;
+  }
+
+  function validateHoliday(input) {
+    const src = input || {};
+    const date = assertYmdInRange(src.holiday_date, 'Elige la fecha del festivo');
+    const name = normalizeName(src.name);
+    if (name.length < 2 || name.length > 80) {
+      throw new Error('El nombre del festivo debe tener entre 2 y 80 caracteres');
+    }
+    const id = src.id ? String(src.id) : null;
+    if (id) assertId(id);
+    return { id: id, holiday_date: date, name: name };
+  }
+
+  function validateVacation(input) {
+    const src = input || {};
+    if (!src.employee_id) throw new Error('Elige a la persona');
+    assertId(src.employee_id);
+    const start = assertYmdInRange(src.start_date, 'Elige la fecha de inicio');
+    const end = assertYmdInRange(src.end_date, 'Elige la fecha de fin');
+    if (end < start) throw new Error('La fecha de fin no puede ser anterior a la de inicio');
+    if (daysInclusive(start, end) > 366) {
+      throw new Error('El periodo no puede pasar de un año. Divídelo si hace falta.');
+    }
+    const note = normalizeName(src.note || '');
+    if (note.length > 280) throw new Error('La nota es demasiado larga');
+    const id = src.id ? String(src.id) : null;
+    if (id) assertId(id);
+    return {
+      id: id,
+      employee_id: String(src.employee_id),
+      start_date: start,
+      end_date: end,
+      note: note || null
+    };
+  }
+
+  function diasSchemaError() {
+    const err = new Error('Faltan las tablas de festivos y vacaciones. Corre sql/09_festivos_y_vacaciones.sql en Supabase.');
+    err.code = 'DIAS_SCHEMA';
+    return err;
+  }
+
+  function isDiasSchemaError(err) {
+    if (!err) return false;
+    return err.code === 'DIAS_SCHEMA' || /09_festivos_y_vacaciones/.test(String(err.message || ''));
+  }
+
+  function isMissingRelation(err, name) {
+    const blob = errText(err);
+    const missing = err.status === 404
+      || err.code === '42P01'
+      || err.code === 'PGRST205'
+      || /PGRST205/.test(blob)
+      || /42P01/.test(blob)
+      || /Could not find the table/i.test(blob)
+      || /relation .+ does not exist/i.test(blob)
+      || (/schema cache/i.test(blob) && /table/i.test(blob));
+    if (!missing) return false;
+    if (!name) return true;
+    return new RegExp(name, 'i').test(blob);
+  }
+
+  async function listExcusedCalendar(employeeId, fromYmd, toYmd) {
+    const from = assertYmdInRange(fromYmd, 'Fecha inválida');
+    const to = assertYmdInRange(toYmd, 'Fecha inválida');
+    if (from > to) throw new Error('Fecha inválida');
+    if (employeeId) assertId(employeeId);
+    const holidayPath = 'kiosk_holidays?select=holiday_date,name'
+      + '&holiday_date=gte.' + from
+      + '&holiday_date=lte.' + to
+      + '&order=holiday_date.asc&limit=1000';
+    try {
+      const holidays = await request(holidayPath) || [];
+      let vacations = [];
+      if (employeeId) {
+        vacations = await request(
+          'kiosk_vacations?select=employee_id,start_date,end_date'
+          + '&employee_id=eq.' + employeeId
+          + '&start_date=lte.' + to
+          + '&end_date=gte.' + from
+          + '&limit=1000'
+        ) || [];
+      }
+      return { available: true, holidays: holidays, vacations: vacations };
+    } catch (err) {
+      if (isMissingRelation(err, 'kiosk_holidays') || isMissingRelation(err, 'kiosk_vacations')) {
+        return { available: false, holidays: [], vacations: [] };
+      }
+      throw err;
+    }
+  }
+
+  async function adminListHolidays(code) {
+    try {
+      return await rpc('admin_list_holidays', { p_code: String(code || '') }) || [];
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminSaveHoliday(code, input) {
+    const clean = validateHoliday(input);
+    try {
+      const rows = await rpc('admin_save_holiday', {
+        p_code: String(code || ''),
+        p_id: clean.id,
+        p_date: clean.holiday_date,
+        p_name: clean.name
+      });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminDeleteHoliday(code, id) {
+    assertId(id);
+    try {
+      await rpc('admin_delete_holiday', { p_code: String(code || ''), p_id: id });
+      return true;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminListVacations(code) {
+    try {
+      return await rpc('admin_list_vacations', { p_code: String(code || '') }) || [];
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminSaveVacation(code, input) {
+    const clean = validateVacation(input);
+    try {
+      const rows = await rpc('admin_save_vacation', {
+        p_code: String(code || ''),
+        p_id: clean.id,
+        p_employee_id: clean.employee_id,
+        p_start: clean.start_date,
+        p_end: clean.end_date,
+        p_note: clean.note
+      });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminDeleteVacation(code, id) {
+    assertId(id);
+    try {
+      await rpc('admin_delete_vacation', { p_code: String(code || ''), p_id: id });
+      return true;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
   async function photoMatchesStoredHash(photoPath, expected) {
     if (!isPhotoPath(photoPath) || !isPhotoSha256(expected)) {
       return { checked: false, ok: false, detail: 'sin huella' };
@@ -1173,6 +1541,27 @@
     adminDelete,
     adminAuditHistory,
     adminVerifyAudit,
-    photoMatchesStoredHash
+    photoMatchesStoredHash,
+    isYmd,
+    formatYmd,
+    weekdayIndex,
+    daysInclusive,
+    statutoryHolidaysMx,
+    indexHolidays,
+    normalizeVacations,
+    excuseForDay,
+    rangesOverlap,
+    tallyAttendance,
+    summarizePeriod,
+    validateHoliday,
+    validateVacation,
+    isDiasSchemaError,
+    listExcusedCalendar,
+    adminListHolidays,
+    adminSaveHoliday,
+    adminDeleteHoliday,
+    adminListVacations,
+    adminSaveVacation,
+    adminDeleteVacation
   };
 });

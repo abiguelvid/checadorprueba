@@ -44,7 +44,7 @@
       display: block; font-size: 10px; letter-spacing: 0.15em;
       text-transform: uppercase; color: #888; margin-bottom: 6px;
     }
-    input[type="password"], input[type="text"], input[type="search"], input[type="date"], select {
+    input[type="password"], input[type="text"], input[type="search"], input[type="date"], input[type="number"], select {
       width: 100%; background: #fff; border: 1px solid #d8d6d0; border-radius: 4px;
       font-family: 'DM Mono', monospace; font-size: 14px; color: #1a1a18;
       padding: 10px 12px; outline: none;
@@ -91,10 +91,17 @@
     .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .photo-card .btn { width: 100%; }
     .table-wrap { overflow-x: auto; }
+    .subhead { font-family: 'Syne', sans-serif; font-size: 15px; margin: 8px 0 12px; }
+    .form-holiday { display: grid; grid-template-columns: 0.7fr 1.3fr auto auto; gap: 10px; align-items: end; }
+    .form-vacation { display: grid; grid-template-columns: 1.1fr 0.7fr 0.7fr 1fr auto; gap: 10px; align-items: end; }
+    .suggest { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin: 14px 0 8px; }
+    .suggest input[type="number"] { width: 120px; }
+    .split { margin-top: 22px; padding-top: 8px; border-top: 1px solid #eee; }
+    tr.editing td { background: #f7f6f1; }
     @media (max-width: 720px) {
       .add-grid { grid-template-columns: 1fr 1fr; }
       .add-grid .span-2 { grid-column: 1 / -1; }
-      .filters { grid-template-columns: 1fr; }
+      .filters, .form-holiday, .form-vacation { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -166,6 +173,100 @@
       </div>
     </div>
 
+    <div class="card section" id="diasCard">
+      <h2>Días que no cuentan como falta</h2>
+      <p class="note">Festivos de toda la empresa y vacaciones de cada persona. El tablero y el CSV no los cuentan como falta. Esta pantalla pide el mismo código de arriba; el kiosko no la abre.</p>
+      <div class="status-bar error" id="diasSchema" role="status" hidden></div>
+
+      <h3 class="subhead">Festivos</h3>
+      <form id="holForm">
+        <div class="form-holiday">
+          <div>
+            <label for="holDate">Fecha</label>
+            <input id="holDate" type="date" required />
+          </div>
+          <div>
+            <label for="holName">Nombre</label>
+            <input id="holName" type="text" maxlength="80" autocomplete="off" placeholder="Navidad" required />
+          </div>
+          <button class="btn btn-outline" id="holCancel" type="button" hidden>Cancelar</button>
+          <button class="btn" id="btnHolSave" type="submit">Agregar festivo</button>
+        </div>
+      </form>
+      <div class="suggest">
+        <div>
+          <label for="holYear">Año</label>
+          <input id="holYear" type="number" min="2000" max="2100" step="1" />
+        </div>
+        <button class="btn btn-outline" id="btnHolSuggest" type="button">Agregar descanso obligatorio de ese año</button>
+      </div>
+      <p class="note">Sugerencia editable de la LFT artículo 74: Año Nuevo, Constitución (primer lunes de febrero), Juárez (tercer lunes de marzo), Día del Trabajo, Independencia, Revolución (tercer lunes de noviembre) y Navidad. El 1 de diciembre se incluye cada seis años, cuando hay transmisión del Ejecutivo. El día de la jornada electoral no viene en la lista: agrégalo a mano si aplica. Lo que ya esté cargado no se pisa.</p>
+      <div class="status-bar" id="holStatus" role="status"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Nombre</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="holBody"></tbody>
+        </table>
+      </div>
+
+      <div class="split">
+        <h3 class="subhead">Vacaciones</h3>
+        <form id="vacForm">
+          <div class="form-vacation">
+            <div>
+              <label for="vacEmp">Empleado</label>
+              <select id="vacEmp" required></select>
+            </div>
+            <div>
+              <label for="vacStart">Inicio</label>
+              <input id="vacStart" type="date" required />
+            </div>
+            <div>
+              <label for="vacEnd">Fin</label>
+              <input id="vacEnd" type="date" required />
+            </div>
+            <div>
+              <label for="vacNote">Nota (opcional)</label>
+              <input id="vacNote" type="text" maxlength="280" autocomplete="off" placeholder="Puente familiar" />
+            </div>
+            <button class="btn" id="btnVacSave" type="submit">Agregar vacaciones</button>
+          </div>
+          <div class="suggest">
+            <button class="btn btn-outline" id="vacCancel" type="button" hidden>Cancelar edición</button>
+          </div>
+        </form>
+        <div class="toolbar">
+          <div class="search">
+            <label for="vacFilter">Ver</label>
+            <select id="vacFilter">
+              <option value="">Todas las personas</option>
+            </select>
+          </div>
+        </div>
+        <div class="status-bar" id="vacStatus" role="status"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Empleado</th>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Nota</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="vacBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div class="card section">
       <form id="addForm">
         <div class="add-grid">
@@ -231,6 +332,11 @@
   let accessCode = '';
   let employees = [];
   let lastRecords = [];
+  let holidays = [];
+  let vacations = [];
+  let diasReady = false;
+  let holidayEditId = null;
+  let vacationEditId = null;
 
   function setStatus(el, msg, type) {
     el.textContent = msg || '';
@@ -265,6 +371,270 @@
         sel.appendChild(opt);
       });
     if (current && employees.some(row => row.id === current)) sel.value = current;
+    fillVacationEmployees();
+  }
+
+  function employeeName(id) {
+    const found = employees.find(row => row.id === id);
+    return found ? found.name : 'Empleado';
+  }
+
+  function fillVacationEmployees() {
+    ['vacEmp', 'vacFilter'].forEach(id => {
+      const sel = $(id);
+      if (!sel) return;
+      const current = sel.value;
+      const keepAll = id === 'vacFilter';
+      sel.replaceChildren();
+      if (keepAll) {
+        const all = document.createElement('option');
+        all.value = '';
+        all.textContent = 'Todas las personas';
+        sel.appendChild(all);
+      } else {
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = 'Elige a la persona';
+        sel.appendChild(blank);
+      }
+      employees
+        .slice()
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'))
+        .forEach(row => {
+          const opt = document.createElement('option');
+          opt.value = row.id;
+          opt.textContent = row.name;
+          sel.appendChild(opt);
+        });
+      if (current && [...sel.options].some(opt => opt.value === current)) sel.value = current;
+    });
+  }
+
+  function setDiasEnabled(on) {
+    ['holDate', 'holName', 'holYear', 'btnHolSave', 'btnHolSuggest', 'vacEmp', 'vacStart', 'vacEnd', 'vacNote', 'btnVacSave', 'vacFilter'].forEach(id => {
+      if ($(id)) $(id).disabled = !on;
+    });
+  }
+
+  function resetHolidayForm() {
+    holidayEditId = null;
+    $('holDate').value = '';
+    $('holName').value = '';
+    $('btnHolSave').textContent = 'Agregar festivo';
+    $('holCancel').hidden = true;
+    renderHolidays();
+  }
+
+  function resetVacationForm() {
+    vacationEditId = null;
+    $('vacStart').value = '';
+    $('vacEnd').value = '';
+    $('vacNote').value = '';
+    $('btnVacSave').textContent = 'Agregar vacaciones';
+    $('vacCancel').hidden = true;
+    renderVacations();
+  }
+
+  function renderHolidays() {
+    const body = $('holBody');
+    body.replaceChildren();
+    const rows = holidays
+      .slice()
+      .sort((a, b) => String(a.holiday_date).localeCompare(String(b.holiday_date)));
+    if (!rows.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 3;
+      td.className = 'empty';
+      td.textContent = diasReady ? 'No hay festivos.' : 'Los festivos aparecen aquí cuando la base ya tiene la tabla.';
+      tr.appendChild(td);
+      body.appendChild(tr);
+      return;
+    }
+    rows.forEach(row => {
+      const tr = document.createElement('tr');
+      if (row.id === holidayEditId) tr.className = 'editing';
+      const date = document.createElement('td');
+      date.textContent = Checador.formatYmd(row.holiday_date);
+      const name = document.createElement('td');
+      name.textContent = row.name || '—';
+      const actions = document.createElement('td');
+      actions.className = 'row-actions';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'btn btn-outline photo-btn';
+      edit.textContent = 'Editar';
+      edit.addEventListener('click', () => beginHolidayEdit(row));
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn btn-danger';
+      del.textContent = 'Borrar';
+      del.addEventListener('click', () => removeHoliday(row));
+      actions.append(edit, del);
+      tr.append(date, name, actions);
+      body.appendChild(tr);
+    });
+  }
+
+  function renderVacations() {
+    const body = $('vacBody');
+    body.replaceChildren();
+    const filter = $('vacFilter') ? $('vacFilter').value : '';
+    const rows = vacations
+      .slice()
+      .filter(row => !filter || row.employee_id === filter)
+      .sort((a, b) => String(a.start_date).localeCompare(String(b.start_date))
+        || employeeName(a.employee_id).localeCompare(employeeName(b.employee_id), 'es'));
+    if (!rows.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.className = 'empty';
+      td.textContent = vacations.length
+        ? 'Nadie de ese filtro tiene vacaciones.'
+        : (diasReady ? 'No hay vacaciones.' : 'Las vacaciones aparecen aquí cuando la base ya tiene la tabla.');
+      tr.appendChild(td);
+      body.appendChild(tr);
+      return;
+    }
+    rows.forEach(row => {
+      const tr = document.createElement('tr');
+      if (row.id === vacationEditId) tr.className = 'editing';
+      const who = document.createElement('td');
+      who.textContent = row.employee_name || employeeName(row.employee_id);
+      const start = document.createElement('td');
+      start.textContent = Checador.formatYmd(row.start_date);
+      const end = document.createElement('td');
+      end.textContent = Checador.formatYmd(row.end_date);
+      const note = document.createElement('td');
+      note.textContent = row.note || '—';
+      const actions = document.createElement('td');
+      actions.className = 'row-actions';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'btn btn-outline photo-btn';
+      edit.textContent = 'Editar';
+      edit.addEventListener('click', () => beginVacationEdit(row));
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn btn-danger';
+      del.textContent = 'Borrar';
+      del.addEventListener('click', () => removeVacation(row));
+      actions.append(edit, del);
+      tr.append(who, start, end, note, actions);
+      body.appendChild(tr);
+    });
+  }
+
+  function beginHolidayEdit(row) {
+    holidayEditId = row.id;
+    $('holDate').value = String(row.holiday_date || '').slice(0, 10);
+    $('holName').value = row.name || '';
+    $('btnHolSave').textContent = 'Guardar festivo';
+    $('holCancel').hidden = false;
+    $('holName').focus();
+    renderHolidays();
+  }
+
+  function beginVacationEdit(row) {
+    vacationEditId = row.id;
+    if ([...$('vacEmp').options].some(opt => opt.value === row.employee_id)) {
+      $('vacEmp').value = row.employee_id;
+    }
+    $('vacStart').value = String(row.start_date || '').slice(0, 10);
+    $('vacEnd').value = String(row.end_date || '').slice(0, 10);
+    $('vacNote').value = row.note || '';
+    $('btnVacSave').textContent = 'Guardar vacaciones';
+    $('vacCancel').hidden = false;
+    renderVacations();
+  }
+
+  async function loadDias() {
+    try {
+      holidays = await Checador.adminListHolidays(accessCode) || [];
+      vacations = await Checador.adminListVacations(accessCode) || [];
+      diasReady = true;
+      $('diasSchema').hidden = true;
+      $('diasSchema').textContent = '';
+      setDiasEnabled(true);
+      renderHolidays();
+      renderVacations();
+    } catch (err) {
+      holidays = [];
+      vacations = [];
+      diasReady = false;
+      renderHolidays();
+      renderVacations();
+      if (Checador.isDiasSchemaError(err)) {
+        $('diasSchema').hidden = false;
+        $('diasSchema').textContent = err.message;
+        setDiasEnabled(false);
+        return;
+      }
+      setDiasEnabled(true);
+      setStatus($('holStatus'), err.message, 'error');
+    }
+  }
+
+  async function removeHoliday(row) {
+    const label = Checador.formatYmd(row.holiday_date) + (row.name ? ' (' + row.name + ')' : '');
+    if (!window.confirm('¿Borrar el festivo del ' + label + '?')) return;
+    setStatus($('holStatus'), 'Borrando…');
+    try {
+      await Checador.adminDeleteHoliday(accessCode, row.id);
+      if (holidayEditId === row.id) resetHolidayForm();
+      await loadDias();
+      setStatus($('holStatus'), 'Se borró el festivo.', 'ok');
+    } catch (err) {
+      setStatus($('holStatus'), err.message, 'error');
+    }
+  }
+
+  async function removeVacation(row) {
+    const who = row.employee_name || employeeName(row.employee_id);
+    if (!window.confirm('¿Borrar las vacaciones de ' + who + ' del ' + Checador.formatYmd(row.start_date) + ' al ' + Checador.formatYmd(row.end_date) + '?')) return;
+    setStatus($('vacStatus'), 'Borrando…');
+    try {
+      await Checador.adminDeleteVacation(accessCode, row.id);
+      if (vacationEditId === row.id) resetVacationForm();
+      await loadDias();
+      setStatus($('vacStatus'), 'Se borraron las vacaciones.', 'ok');
+    } catch (err) {
+      setStatus($('vacStatus'), err.message, 'error');
+    }
+  }
+
+  async function suggestHolidays() {
+    const year = Number($('holYear').value);
+    let suggestions;
+    try {
+      suggestions = Checador.statutoryHolidaysMx(year);
+    } catch (err) {
+      setStatus($('holStatus'), err.message, 'error');
+      return;
+    }
+    const have = new Set(holidays.map(row => String(row.holiday_date).slice(0, 10)));
+    const missing = suggestions.filter(row => !have.has(row.holiday_date));
+    if (!missing.length) {
+      setStatus($('holStatus'), 'Esos días de ' + year + ' ya están cargados. Puedes editar el nombre o borrar uno.', 'ok');
+      return;
+    }
+    const preview = missing.map(row => Checador.formatYmd(row.holiday_date) + ' ' + row.name).join('\n');
+    if (!window.confirm('Se van a agregar ' + missing.length + ' días de ' + year + ' que todavía no están. Los que ya existen no se pisan.\n\n' + preview)) return;
+    $('btnHolSuggest').disabled = true;
+    setStatus($('holStatus'), 'Guardando sugerencias…');
+    try {
+      for (const row of missing) {
+        await Checador.adminSaveHoliday(accessCode, row);
+      }
+      await loadDias();
+      setStatus($('holStatus'), 'Se agregaron ' + missing.length + ' días. Si quieres, cambia el nombre o borra alguno.', 'ok');
+    } catch (err) {
+      await loadDias();
+      setStatus($('holStatus'), err.message, 'error');
+    } finally {
+      $('btnHolSuggest').disabled = !diasReady;
+    }
   }
 
   function renderRecords(rows) {
@@ -522,7 +892,9 @@
       setStatus($('appStatus'), employees.length + ' empleados.', 'ok');
       render();
       fillRecordEmployees();
+      $('holYear').value = Checador.todayCdmx().slice(0, 4);
       loadRecords();
+      loadDias();
     } catch (err) {
       const msg = Checador.isAdminAuthError(err) ? 'Código de acceso incorrecto.' : err.message;
       setStatus($('gateStatus'), msg, 'error');
@@ -605,16 +977,92 @@
   });
   $('recDate').value = Checador.todayCdmx();
 
+  $('holForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    $('btnHolSave').disabled = true;
+    setStatus($('holStatus'), 'Guardando…');
+    try {
+      const clean = Checador.validateHoliday({
+        id: holidayEditId,
+        holiday_date: $('holDate').value,
+        name: $('holName').value
+      });
+      const duplicate = holidays.some(row => String(row.holiday_date).slice(0, 10) === clean.holiday_date && row.id !== clean.id);
+      if (duplicate) throw new Error('Esa fecha ya es festivo. Edítala si quieres cambiar el nombre.');
+      await Checador.adminSaveHoliday(accessCode, clean);
+      resetHolidayForm();
+      await loadDias();
+      setStatus($('holStatus'), clean.id ? 'Festivo actualizado.' : 'Festivo agregado.', 'ok');
+    } catch (err) {
+      setStatus($('holStatus'), err.message, 'error');
+    } finally {
+      $('btnHolSave').disabled = !diasReady;
+    }
+  });
+
+  $('holCancel').addEventListener('click', () => {
+    resetHolidayForm();
+    setStatus($('holStatus'), '');
+  });
+  $('btnHolSuggest').addEventListener('click', suggestHolidays);
+
+  $('vacForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    $('btnVacSave').disabled = true;
+    setStatus($('vacStatus'), 'Guardando…');
+    try {
+      const clean = Checador.validateVacation({
+        id: vacationEditId,
+        employee_id: $('vacEmp').value,
+        start_date: $('vacStart').value,
+        end_date: $('vacEnd').value,
+        note: $('vacNote').value
+      });
+      const clash = vacations.some(row => row.id !== clean.id
+        && row.employee_id === clean.employee_id
+        && Checador.rangesOverlap(
+          String(row.start_date).slice(0, 10),
+          String(row.end_date).slice(0, 10),
+          clean.start_date,
+          clean.end_date
+        ));
+      if (clash) throw new Error('Esas fechas se empalman con otras vacaciones de la misma persona');
+      await Checador.adminSaveVacation(accessCode, clean);
+      resetVacationForm();
+      await loadDias();
+      setStatus($('vacStatus'), clean.id ? 'Vacaciones actualizadas.' : 'Vacaciones agregadas.', 'ok');
+    } catch (err) {
+      setStatus($('vacStatus'), err.message, 'error');
+    } finally {
+      $('btnVacSave').disabled = !diasReady;
+    }
+  });
+  $('vacCancel').addEventListener('click', () => {
+    resetVacationForm();
+    setStatus($('vacStatus'), '');
+  });
+  $('vacFilter').addEventListener('change', renderVacations);
+
   $('btnLogout').addEventListener('click', () => {
     forget();
     accessCode = '';
     employees = [];
+    holidays = [];
+    vacations = [];
+    diasReady = false;
+    holidayEditId = null;
+    vacationEditId = null;
     Checador.resetClientState();
     $('accessCode').value = '';
     $('app').hidden = true;
     $('gate').hidden = false;
+    $('diasSchema').hidden = true;
+    resetHolidayForm();
+    resetVacationForm();
     setStatus($('gateStatus'), '');
     setStatus($('appStatus'), '');
+    setStatus($('holStatus'), '');
+    setStatus($('vacStatus'), '');
   });
 
   const previous = stored();

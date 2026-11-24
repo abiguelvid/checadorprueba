@@ -84,6 +84,11 @@
     .cal-day.green   { background: #eaf3de; border-color: #97c459; }
     .cal-day.yellow  { background: #fdf3dc; border-color: #d4a017; }
     .cal-day.red     { background: #faeaea; border-color: #d88080; }
+    .cal-day.festivo { background: #e7eef8; border-color: #8eadd4; }
+    .cal-day.vacaciones { background: #f3e9f8; border-color: #c4a0d4; }
+    .excuse-label { font-size: 8px; letter-spacing: 0.04em; text-transform: uppercase; text-align: center; margin-top: 3px; line-height: 1.2; }
+    .cal-day.festivo .excuse-label { color: #2c466c; }
+    .cal-day.vacaciones .excuse-label { color: #5c3a6e; }
     .day-num { font-size: 13px; font-weight: 500; color: #1a1a18; line-height: 1; }
     .cal-day.green  .day-num { color: #27500a; }
     .cal-day.yellow .day-num { color: #7a5200; }
@@ -147,6 +152,7 @@
   </div>
 
   <div class="status-bar" id="statusBar"></div>
+  <div class="period-note" id="excuseNote"></div>
 
   <div class="kpi-row">
     <div class="kpi"><div class="kpi-val neutral" id="kTotal">—</div><div class="kpi-label">Días registrados</div></div>
@@ -166,6 +172,8 @@
     <div class="leg"><div class="leg-dot" style="background:#639922"></div> Entrada antes 9:30</div>
     <div class="leg"><div class="leg-dot" style="background:#d4a017"></div> Entrada 9:30–11:00</div>
     <div class="leg"><div class="leg-dot" style="background:#d88080"></div> Entrada después 11:00 / sin registro</div>
+    <div class="leg"><div class="leg-dot" style="background:#8eadd4"></div> Festivo</div>
+    <div class="leg"><div class="leg-dot" style="background:#c4a0d4"></div> Vacaciones</div>
     <div class="leg" style="margin-left:8px; border-left:1px solid #ddd; padding-left:16px;">
       <div class="dot-in" style="width:9px;height:9px;border-radius:50%;background:#639922;flex-shrink:0"></div> Entrada
     </div>
@@ -193,8 +201,9 @@
 const now = new Date();
 let calYear  = now.getFullYear();
 let calMonth = now.getMonth();
-let dayMap   = {};   // dayKey → { inRec, outRec, cls }
+let dayMap   = {};   // dayKey → { inRec, outRec, cls, ymd }
 let employees = [];
+let periodExcuse = { holidaysByDate: {}, vacations: [], available: false };
 
 const MONTHS_ES   = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const DAYS_ES     = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
@@ -272,10 +281,17 @@ async function loadData() {
   const dateFrom = new Date(fy, fm - 1, 1).toISOString();
   const dateTo   = new Date(ty, tm, 0, 23, 59, 59).toISOString();
   const empName  = employees.find(e => e.id == empId)?.name || '';
-
+  const fromYmd = fy + '-' + String(fm).padStart(2, '0') + '-01';
+  const toYmd = ty + '-' + String(tm).padStart(2, '0') + '-' + String(new Date(ty, tm, 0).getDate()).padStart(2, '0');
   setStatus(`Cargando datos de ${empName}...`);
 
   try {
+    const excused = await Checador.listExcusedCalendar(empId, fromYmd, toYmd);
+    const nextExcuse = {
+      holidaysByDate: Checador.indexHolidays(excused.holidays),
+      vacations: Checador.normalizeVacations(excused.vacations),
+      available: !!excused.available
+    };
     const rows = await Checador.fetchAttendance(empId, dateFrom, dateTo);
 
     // Separar y procesar
@@ -287,16 +303,17 @@ async function loadData() {
       const mx  = toMx(r.timestamp);
       const key = dayKey(mx);
       const coords = Checador.readCoords(r) || {};
-      const punch = { action: r.action, t: mx.getTime(), mx, timeStr: fmtTime(mx), ...coords };
+      const punch = { action: r.action, t: mx.getTime(), mx, timeStr: fmtTime(mx), ymd: ymdOf(mx), ...coords };
       if (!byDay[key]) byDay[key] = [];
       byDay[key].push(punch);
       if (r.action === 'checkin') {
-        if (!ins[key]) ins[key] = { mx, timeStr: fmtTime(mx), cls: classify(mx), ...coords };
+        if (!ins[key]) ins[key] = { mx, timeStr: fmtTime(mx), cls: classify(mx), ymd: ymdOf(mx), ...coords };
       } else if (r.action === 'checkout') {
         outs[key] = { mx, timeStr: fmtTime(mx), ...coords };
       }
     });
 
+    periodExcuse = nextExcuse;
     dayMap = {};
     const allKeys = new Set([...Object.keys(ins), ...Object.keys(outs), ...Object.keys(byDay)]);
     allKeys.forEach(k => {
@@ -304,13 +321,18 @@ async function loadData() {
         inRec:  ins[k]  || null,
         outRec: outs[k] || null,
         cls:    ins[k]  ? ins[k].cls : 'red',
+        ymd:    (ins[k] && ins[k].ymd) || ymdFromCalendarKey(k),
         summary: Checador.summarizeDay(byDay[k] || [])
       };
     });
 
     updateKPIs(fy, fm, ty, tm);
     const totalIn = Object.keys(ins).length;
-    setStatus(`${totalIn} días con entrada cargados — ${empName}.`, 'ok');
+    const excusedDays = countExcusedWeekdays(fromYmd, toYmd);
+    const extra = excusedDays
+      ? ' ' + excusedDays + ' días de festivo o vacaciones no cuentan como falta.'
+      : '';
+    setStatus(`${totalIn} días con entrada cargados — ${empName}.` + extra, 'ok');
 
     calYear  = fy;
     calMonth = fm - 1;
@@ -321,29 +343,61 @@ async function loadData() {
 }
 
 /* ── KPIs ── */
+function ymdOf(mxDate) {
+  return mxDate.getFullYear() + '-'
+    + String(mxDate.getMonth() + 1).padStart(2, '0') + '-'
+    + String(mxDate.getDate()).padStart(2, '0');
+}
+function ymdFromCalendarKey(key) {
+  const parts = String(key || '').split('-').map(Number);
+  if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) return '';
+  return parts[0] + '-' + String(parts[1] + 1).padStart(2, '0') + '-' + String(parts[2]).padStart(2, '0');
+}
+function todayYmdMx() {
+  return ymdOf(toMx(new Date().toISOString()));
+}
+function excuseOn(ymd) {
+  return Checador.excuseForDay(ymd, periodExcuse.holidaysByDate, periodExcuse.vacations);
+}
+function countExcusedWeekdays(fromYmd, toYmd) {
+  const tally = Checador.tallyAttendance({
+    fromYmd,
+    toYmd,
+    todayYmd: todayYmdMx(),
+    holidaysByDate: periodExcuse.holidaysByDate,
+    vacations: periodExcuse.vacations,
+    checkinYmds: []
+  });
+  return tally.holidayDays + tally.vacationDays;
+}
+function esc(value) {
+  return Checador.escapeAttr(value).replace(/>/g, '&gt;');
+}
+
 function updateKPIs(fy, fm, ty, tm) {
-  const todayMx   = toMx(new Date().toISOString());
-  let workDays = 0;
-  const iter = new Date(fy, fm - 1, 1);
-  const end  = new Date(ty, tm, 0);
-  while (iter <= end && iter <= todayMx) {
-    const d = iter.getDay();
-    if (d !== 0 && d !== 6) workDays++;
-    iter.setDate(iter.getDate() + 1);
-  }
+  const fromYmd = fy + '-' + String(fm).padStart(2, '0') + '-01';
+  const toYmd = ty + '-' + String(tm).padStart(2, '0') + '-' + String(new Date(ty, tm, 0).getDate()).padStart(2, '0');
+  const entries = Object.values(dayMap)
+    .filter(d => d.inRec)
+    .map(d => ({ ymd: d.ymd || (d.inRec && d.inRec.ymd), cls: d.cls }));
+  const summary = Checador.summarizePeriod({
+    fromYmd,
+    toYmd,
+    todayYmd: todayYmdMx(),
+    holidaysByDate: periodExcuse.holidaysByDate,
+    vacations: periodExcuse.vacations,
+    entries
+  });
 
-  const entries = Object.values(dayMap).filter(d => d.inRec);
-  const g  = entries.filter(d => d.cls === 'green').length;
-  const y  = entries.filter(d => d.cls === 'yellow').length;
-  const r  = entries.filter(d => d.cls === 'red').length;
-  const absences = Math.max(0, workDays - entries.length);
-  const pct = workDays > 0 ? Math.round((g / workDays) * 100) : 0;
-
-  $('kTotal').textContent  = entries.length;
-  $('kGreen').textContent  = g;
-  $('kYellow').textContent = y;
-  $('kRed').textContent    = r + absences;
-  $('kPct').textContent    = pct + '%';
+  $('kTotal').textContent  = summary.registered;
+  $('kGreen').textContent  = summary.green;
+  $('kYellow').textContent = summary.yellow;
+  $('kRed').textContent    = summary.faltaOTarde;
+  $('kPct').textContent    = summary.punctuality + '%';
+  const excusedDays = summary.holidayDays + summary.vacationDays;
+  $('excuseNote').textContent = excusedDays
+    ? 'En este periodo, ' + excusedDays + ' días de entre semana son festivo o vacaciones y no cuentan como falta.'
+    : '';
 }
 
 /* ── Calendar ── */
@@ -385,6 +439,8 @@ function renderCalendar() {
     const dow     = dayDate.getDay();
     const isWknd  = dow === 0 || dow === 6;
     const key     = `${calYear}-${calMonth}-${day}`;
+    const ymd     = calYear + '-' + String(calMonth + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+    const excuse  = excuseOn(ymd);
     const isFuture = dayDate > todayMx && key !== todayKey;
 
     const cell = document.createElement('div');
@@ -452,17 +508,38 @@ function renderCalendar() {
       const mealLine = summary.meals
         ? `Comida: <b>${summary.lunchLabel}</b>` + (summary.openLunch ? ' · sigue en comida' : '')
         : '';
+      if (excuse && !isWknd) {
+        const tag = document.createElement('div');
+        tag.className = 'excuse-label';
+        tag.textContent = excuse.kind === 'festivo' ? 'Festivo' : 'Vacaciones';
+        cell.appendChild(tag);
+      }
+
       const lines = [
         `Entrada: <b>${rec.inRec.timeStr}</b> MX`,
         `Salida: <b>${rec.outRec ? rec.outRec.timeStr : '—'}</b> MX`,
         mealLine,
         CLS_LABELS[rec.cls],
+        excuse && !isWknd
+          ? (excuse.kind === 'festivo'
+            ? 'Festivo: <b>' + esc(excuse.label) + '</b>. No cuenta como falta.'
+            : 'Vacaciones. No cuenta como falta.')
+          : '',
         `<span style="color:#aaa;font-size:10px">${durStr}</span>`,
         mapAnchor('Ubicación entrada', rec.inRec),
         rec.outRec ? mapAnchor('Ubicación salida', rec.outRec) : ''
       ].filter(Boolean);
       tip.innerHTML = lines.join('<br>');
 
+    } else if (excuse && !isWknd) {
+      cell.classList.add(excuse.kind);
+      const tag = document.createElement('div');
+      tag.className = 'excuse-label';
+      tag.textContent = excuse.kind === 'festivo' ? 'Festivo' : 'Vacaciones';
+      cell.appendChild(tag);
+      tip.innerHTML = excuse.kind === 'festivo'
+        ? 'Festivo: <b>' + esc(excuse.label) + '</b><br>No cuenta como falta.'
+        : 'Vacaciones.<br>No cuenta como falta.';
     } else if (!isWknd && !isFuture) {
       cell.classList.add('red');
       tip.textContent = 'Sin registro de entrada';
@@ -511,7 +588,8 @@ function exportCSV() {
   const from = $('periodFrom').value;
   const to   = $('periodTo').value;
 
-  if (!Object.keys(dayMap).length) {
+  const hasExcuse = Object.keys(periodExcuse.holidaysByDate).length || periodExcuse.vacations.length;
+  if (!Object.keys(dayMap).length && !hasExcuse) {
     setStatus('No hay datos para exportar.', 'error'); return;
   }
 
@@ -537,7 +615,12 @@ function exportCSV() {
       const isFuture = iter > todayMx;
       if (!isFuture) {
         const fechaStr = `${String(iter.getDate()).padStart(2,'0')}/${String(iter.getMonth()+1).padStart(2,'0')}/${iter.getFullYear()}`;
+        const ymd = iter.getFullYear() + '-' + String(iter.getMonth() + 1).padStart(2, '0') + '-' + String(iter.getDate()).padStart(2, '0');
+        const excuse = excuseOn(ymd);
         const rec = dayMap[key];
+        const excuseStatus = excuse
+          ? (excuse.kind === 'festivo' ? 'Festivo: ' + String(excuse.label).replace(/"/g, "'") : 'Vacaciones')
+          : '';
         if (rec && rec.inRec) {
           const outStr = rec.outRec ? rec.outRec.timeStr : '—';
           const summary = rec.summary || Checador.summarizeDay([]);
@@ -546,14 +629,15 @@ function exportCSV() {
             : '—';
           const mealOut = summary.firstOut ? fmtTime(new Date(summary.firstOut.t)) : '';
           const mealIn = summary.lastIn ? fmtTime(new Date(summary.lastIn.t)) : '';
+          const estado = CLS_LABELS[rec.cls] + (excuseStatus ? ' · ' + excuseStatus : '');
           rows.push([
-            fechaStr, DAYS_FULL[dow], rec.inRec.timeStr, outStr, dur, CLS_LABELS[rec.cls], empName,
+            fechaStr, DAYS_FULL[dow], rec.inRec.timeStr, outStr, dur, estado, empName,
             ...locCells(rec.inRec),
             ...locCells(rec.outRec),
             mealOut, mealIn, String(Math.round(summary.lunchMs / 60000))
           ]);
         } else {
-          rows.push([fechaStr, DAYS_FULL[dow], '—', '—', '—', 'Sin registro', empName, '', '', '', '', '', '', '', '', '', '', '0']);
+          rows.push([fechaStr, DAYS_FULL[dow], '—', '—', '—', excuseStatus || 'Sin registro', empName, '', '', '', '', '', '', '', '', '', '', '0']);
         }
       }
     }
