@@ -1,7 +1,7 @@
 /* Checador Nanofactor
    Cliente compartido del tablero, el kiosko y la admin.
-   Habla con Supabase por la anon key. Si las funciones o las columnas
-   de ubicación todavía no existen, vuelve al comportamiento anterior.
+   Habla con Supabase por la anon key. Si las funciones todavía no
+   existen, el kiosko inserta directo, pero nunca sin lat y lng.
    El código de abajo solo aplica ANTES de correr sql/03. Después, el
    código válido es el de la tabla kiosk_settings (ver README-checador.md). */
 (function (root, factory) {
@@ -281,6 +281,37 @@
     }
     if (w <= max) return { width: Math.round(w), height: Math.round(h) };
     return { width: max, height: Math.max(1, Math.round(h * (max / w))) };
+  }
+
+  function locationMessage(reason) {
+    if (reason === 'denied') {
+      return 'El navegador bloqueó el permiso de ubicación. En la barra de direcciones, permite la ubicación para este sitio y pulsa Reintentar. No se guardó nada.';
+    }
+    if (reason === 'timeout') {
+      return 'La ubicación tardó demasiado. Activa el GPS del aparato, acércate a una ventana o sal un momento al aire libre y pulsa Reintentar. No se guardó nada.';
+    }
+    if (reason === 'unsupported') {
+      return 'Este navegador no puede compartir la ubicación. Ábrelo en Chrome o Safari, activa la ubicación y pulsa Reintentar. No se guardó nada.';
+    }
+    if (reason === 'unavailable') {
+      return 'El aparato no pudo obtener la ubicación. Activa la ubicación o el GPS en los ajustes del sistema y pulsa Reintentar. No se guardó nada.';
+    }
+    return 'No llegó una ubicación válida. Activa la ubicación del aparato, permite que el navegador la use y pulsa Reintentar. No se guardó nada.';
+  }
+
+  function locationRequiredError(reason) {
+    const err = new Error(locationMessage(reason));
+    err.code = 'LOCATION_REQUIRED';
+    err.reason = reason || 'invalid';
+    return err;
+  }
+
+  function locationOutcome(reason, location) {
+    if (reason === 'ok' && location) {
+      return { ok: true, location: location, reason: 'ok', message: '' };
+    }
+    const why = reason && reason !== 'ok' ? reason : 'invalid';
+    return { ok: false, location: null, reason: why, message: locationMessage(why) };
   }
 
   function cameraErrorMessage(err) {
@@ -688,6 +719,7 @@
       if (!isPhotoSha256(photoSha256)) throw new Error('Falta la huella de la foto. No se registró la asistencia.');
     }
     const loc = sanitizeLocation(input.location);
+    if (!loc) throw locationRequiredError('invalid');
     const emp = await verifyPin(cleanPin);
     if (!emp) throw new Error('PIN no encontrado');
     if (photoRequired && photoPath.split('/')[0] !== String(emp.id || '').toLowerCase()) {
@@ -701,9 +733,9 @@
         const rows = await rpc('register_attendance', {
           p_pin: cleanPin,
           p_action: action,
-          p_lat: loc ? loc.lat : null,
-          p_lng: loc ? loc.lng : null,
-          p_accuracy: loc ? loc.accuracy : null,
+          p_lat: loc.lat,
+          p_lng: loc.lng,
+          p_accuracy: loc.accuracy,
           p_photo_path: photoRequired ? photoPath : null,
           p_photo_sha256: photoRequired ? photoSha256 : null
         });
@@ -732,66 +764,104 @@
     }
 
     let inserted = null;
-    let sentLocation = false;
-    if (loc) {
-      try {
-        inserted = await insertRow('kiosk_attendance', Object.assign({
-          employee_id: base.employee_id,
-          employee_name: base.employee_name,
-          action: base.action,
-          timestamp: base.timestamp,
-          lat: loc.lat,
-          lng: loc.lng,
-          accuracy: loc.accuracy
-        }, photoRequired ? { photo_path: photoPath, photo_sha256: photoSha256 } : {}));
-        sentLocation = true;
-      } catch (err) {
-        throwIfPhotoSchema(err);
-        if (!isMissingLocationColumn(err)) throw err;
+    try {
+      inserted = await insertRow('kiosk_attendance', Object.assign({
+        employee_id: base.employee_id,
+        employee_name: base.employee_name,
+        action: base.action,
+        timestamp: base.timestamp,
+        lat: loc.lat,
+        lng: loc.lng,
+        accuracy: loc.accuracy
+      }, photoRequired ? { photo_path: photoPath, photo_sha256: photoSha256 } : {}));
+    } catch (err) {
+      throwIfPhotoSchema(err);
+      if (isMissingLocationColumn(err)) {
+        throw new Error('Faltan las columnas de ubicación. No se registró la asistencia.');
       }
-    }
-    if (!inserted) {
-      try {
-        inserted = await insertRow('kiosk_attendance', base);
-      } catch (err) {
-        throwIfPhotoSchema(err);
-        throw err;
-      }
+      throw err;
     }
 
     return normalizePunch(inserted, {
       action,
       employee_id: emp.id,
       employee_name: emp.name,
-      saved_location: sentLocation
+      saved_location: true
     });
   }
 
-  function readLocation() {
-    const geo = typeof navigator !== 'undefined' ? navigator.geolocation : null;
-    if (!geo || typeof geo.getCurrentPosition !== 'function') {
-      return Promise.resolve(null);
-    }
+  function geolocationReason(err) {
+    const code = err && err.code;
+    if (code === 1) return 'denied';
+    if (code === 3) return 'timeout';
+    if (code === 2) return 'unavailable';
+    return 'unavailable';
+  }
+
+  function askPosition(geo, options) {
+    const timeoutMs = options.timeout;
+    const watchdogMs = timeoutMs >= 1000 ? timeoutMs + 1500 : timeoutMs + 40;
     return new Promise(function (resolve) {
       let done = false;
-      const finish = function (value) {
+      const finish = function (reason, location) {
         if (done) return;
         done = true;
-        resolve(value);
+        resolve({ reason: reason, location: location || null });
       };
-      const timer = setTimeout(function () { finish(null); }, 9000);
-      geo.getCurrentPosition(
-        function (pos) {
-          clearTimeout(timer);
-          finish(sanitizeLocation(pos && pos.coords));
-        },
-        function () {
-          clearTimeout(timer);
-          finish(null);
-        },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 120000 }
-      );
+      const timer = setTimeout(function () { finish('timeout', null); }, watchdogMs);
+      try {
+        geo.getCurrentPosition(
+          function (pos) {
+            clearTimeout(timer);
+            const loc = sanitizeLocation(pos && pos.coords);
+            finish(loc ? 'ok' : 'invalid', loc);
+          },
+          function (err) {
+            clearTimeout(timer);
+            finish(geolocationReason(err), null);
+          },
+          {
+            enableHighAccuracy: options.enableHighAccuracy,
+            timeout: timeoutMs,
+            maximumAge: options.maximumAge
+          }
+        );
+      } catch (_) {
+        clearTimeout(timer);
+        finish('unsupported', null);
+      }
     });
+  }
+
+  /* Pide un punto válido. Si la ubicación precisa tarda o no está
+     disponible, reintenta una vez con la ubicación aproximada.
+     El permiso denegado no se reintenta: el navegador no vuelve a preguntar. */
+  async function readLocation(options) {
+    const scope = typeof globalThis !== 'undefined' ? globalThis : null;
+    const nav = scope && scope.navigator;
+    const geo = nav && nav.geolocation;
+    if (!geo || typeof geo.getCurrentPosition !== 'function') {
+      return locationOutcome('unsupported');
+    }
+    const opts = options || {};
+    const highTimeout = Number(opts.highTimeoutMs) > 0 ? Number(opts.highTimeoutMs) : 8000;
+    const lowTimeout = Number(opts.lowTimeoutMs) > 0 ? Number(opts.lowTimeoutMs) : 7000;
+    const first = await askPosition(geo, {
+      enableHighAccuracy: true,
+      timeout: highTimeout,
+      maximumAge: 60000
+    });
+    if (first.reason === 'ok') return locationOutcome('ok', first.location);
+    if (opts.attempts === 1 || first.reason === 'denied' || first.reason === 'unsupported') {
+      return locationOutcome(first.reason);
+    }
+    const second = await askPosition(geo, {
+      enableHighAccuracy: false,
+      timeout: lowTimeout,
+      maximumAge: 0
+    });
+    if (second.reason === 'ok') return locationOutcome('ok', second.location);
+    return locationOutcome(second.reason);
   }
 
   async function listEmployeesDirect() {

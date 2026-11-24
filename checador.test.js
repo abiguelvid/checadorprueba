@@ -142,7 +142,7 @@ test('verify_pin usa la función y no el fallback si responde vacío', async () 
   assert.deepEqual(calls[0].body, { p_pin: '2465' });
 });
 
-test('sin la función, el kiosko busca el PIN en la tabla y registra sin ubicación', async () => {
+test('sin la función, el kiosko busca el PIN en la tabla y registra con ubicación', async () => {
   Checador.resetClientState();
   const calls = [];
   global.fetch = async (url, options) => {
@@ -160,23 +160,37 @@ test('sin la función, el kiosko busca el PIN en la tabla y registra sin ubicaci
       return jsonResponse(200, [{ action: 'checkout' }]);
     }
     if (url.endsWith('/kiosk_attendance') && options.method === 'POST') {
-      assert.equal(calls.at(-1).body.lat, undefined);
+      assert.equal(calls.at(-1).body.lat, 19.4);
+      assert.equal(calls.at(-1).body.lng, -99.2);
       return jsonResponse(201, [{
         employee_name: 'LEON ALBARRAN MENA',
         action: 'checkin',
-        timestamp: '2026-11-03T15:00:00Z'
+        timestamp: '2026-11-03T15:00:00Z',
+        lat: 19.4,
+        lng: -99.2,
+        accuracy: 15
       }]);
     }
     return jsonResponse(500, { message: 'inesperado ' + url });
   };
 
-  const row = await Checador.registerAttendance({ pin: '2465', action: 'checkin', location: null, photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA });
+  const row = await Checador.registerAttendance({
+    pin: '2465',
+    action: 'checkin',
+    location: { lat: 19.4, lng: -99.2, accuracy: 15 },
+    photoPath: photoFor(EMP_A),
+    photoSha256: PHOTO_SHA
+  });
   assert.equal(row.employee_name, 'LEON ALBARRAN MENA');
-  assert.equal(row.saved_location, false);
+  assert.equal(row.saved_location, true);
   assert.equal(row.action, 'checkin');
+  const inserts = calls.filter(call => call.method === 'POST' && String(call.url).endsWith('/kiosk_attendance'));
+  assert.equal(inserts.length, 1);
+  assert.equal(inserts[0].body.lat, 19.4);
+  assert.equal(inserts[0].body.lng, -99.2);
 });
 
-test('si faltan columnas de ubicación, reintenta el insert sin ellas', async () => {
+test('si faltan columnas de ubicación, no inserta la checada', async () => {
   Checador.resetClientState();
   const bodies = [];
   global.fetch = async (url, options) => {
@@ -189,30 +203,27 @@ test('si faltan columnas de ubicación, reintenta el insert sin ellas', async ()
     }
     if (options.method === 'POST') {
       bodies.push(body);
-      if (body.lat != null) {
-        return jsonResponse(400, {
-          code: 'PGRST204',
-          message: "Could not find the 'lat' column of 'kiosk_attendance' in the schema cache"
-        });
-      }
-      return jsonResponse(201, []);
+      return jsonResponse(400, {
+        code: 'PGRST204',
+        message: "Could not find the 'lat' column of 'kiosk_attendance' in the schema cache"
+      });
     }
     return jsonResponse(500, { message: url });
   };
 
-  const row = await Checador.registerAttendance({
-    pin: '3352',
-    action: 'checkout',
-    location: { lat: 19.4, lng: -99.1, accuracy: 20 },
-    photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA
-  });
-  assert.equal(bodies.length, 2);
+  await assert.rejects(
+    () => Checador.registerAttendance({
+      pin: '3352',
+      action: 'checkout',
+      location: { lat: 19.4, lng: -99.1, accuracy: 20 },
+      photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA
+    }),
+    /columnas de ubicación/
+  );
+  assert.equal(bodies.length, 1);
   assert.equal(bodies[0].lat, 19.4);
+  assert.equal(bodies[0].lng, -99.1);
   assert.equal(bodies[0].photo_path, photoFor(EMP_A));
-  assert.equal(bodies[1].lat, undefined);
-  assert.equal(bodies[1].photo_path, photoFor(EMP_A));
-  assert.equal(bodies[1].employee_name, 'MONICA RABASA');
-  assert.equal(row.saved_location, false);
 });
 
 test('con la función nueva manda la ubicación y no inserta directo', async () => {
@@ -491,6 +502,7 @@ test('la foto que no es del empleado no se inserta', async () => {
     () => Checador.registerAttendance({
       pin: '2465',
       action: 'checkin',
+      location: { lat: 19.4, lng: -99.1, accuracy: 8 },
       photoPath: photoFor(EMP_B), photoSha256: PHOTO_SHA
     }),
     /no corresponde/
@@ -522,7 +534,7 @@ test('si falta la columna photo_path no reintenta sin foto', async () => {
     () => Checador.registerAttendance({
       pin: '2465',
       action: 'checkout',
-      location: null,
+      location: { lat: 19.4, lng: -99.1, accuracy: 8 },
       photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA
     }),
     /sql\/04_foto_kiosk_attendance\.sql/
@@ -628,6 +640,17 @@ test('el kiosco toma la foto antes de registrar y la admin la abre firmada', () 
   const registerAt = kiosk.lastIndexOf('registerAttendance');
   assert.equal(mealAt > 0 && mealAt < hashAt && hashAt < uploadAt && uploadAt < registerAt, true);
   assert.equal(kiosk.slice(mealAt, hashAt).includes('sha256Hex'), false);
+  const punchAt = kiosk.indexOf('async function punch(action)');
+  const punchBody = kiosk.slice(punchAt);
+  const mealBody = kiosk.slice(mealAt, punchAt);
+  assert.equal(mealBody.indexOf('obtainLocation') < mealBody.indexOf('registerAttendance'), true);
+  assert.equal(punchBody.indexOf('obtainLocation') < punchBody.indexOf('takePhoto()'), true);
+  assert.equal(punchBody.indexOf('takePhoto()') < punchBody.indexOf('uploadAttendancePhoto'), true);
+  assert.equal(kiosk.includes('se guarda igual'), false);
+  assert.equal(kiosk.includes('sin ubicación'), false);
+  assert.match(kiosk, /La ubicación es obligatoria/);
+  assert.match(kiosk, /Reintentar/);
+  assert.match(kiosk, /No se pudo checar/);
   assert.match(kiosk, /facingMode:\s*\{\s*ideal:\s*'user'/);
   assert.match(kiosk, /playsinline/);
   assert.match(kiosk, /Checador\.AVISO_FOTO/);
@@ -764,11 +787,11 @@ test('la comida no pide foto y respeta la secuencia del día', async () => {
     return jsonResponse(500, { message: url });
   };
   await assert.rejects(
-    () => Checador.registerAttendance({ pin: '2465', action: 'lunch_out', location: null }),
+    () => Checador.registerAttendance({ pin: '2465', action: 'lunch_out', location: { lat: 19.4, lng: -99.1, accuracy: 8 } }),
     /entrada abierta/
   );
   await assert.rejects(
-    () => Checador.registerAttendance({ pin: '2465', action: 'lunch_in', location: null }),
+    () => Checador.registerAttendance({ pin: '2465', action: 'lunch_in', location: { lat: 19.4, lng: -99.1, accuracy: 8 } }),
     /salida a comer de hoy/
   );
 
@@ -802,4 +825,174 @@ test('la bitácora es append-only, encadena SHA-256 y no se activa sola', () => 
   assert.equal(/^\s*(delete|update)\s+from\s+public\.kiosk_audit_log/im.test(sql), false);
   assert.equal(/^\s*select\s+cron\.schedule/im.test(sql), false);
   assert.match(sql, /p_photo_sha256/);
+});
+
+test('sin ubicación no llama a la base en ningún marcaje', async () => {
+  Checador.resetClientState();
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return jsonResponse(500, { message: 'no debería llamarse' });
+  };
+  const attempts = [
+    { pin: '2465', action: 'checkin', location: null, photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA },
+    { pin: '2465', action: 'checkout', location: { lat: 91, lng: 0 }, photoPath: photoFor(EMP_A), photoSha256: PHOTO_SHA },
+    { pin: '2465', action: 'lunch_out' },
+    { pin: '2465', action: 'lunch_in', location: { lat: 19.4, lng: null } }
+  ];
+  for (const attempt of attempts) {
+    await assert.rejects(() => Checador.registerAttendance(attempt), (err) => {
+      assert.equal(err.code, 'LOCATION_REQUIRED');
+      assert.match(err.message, /ubicaci[oó]n/);
+      assert.match(err.message, /Reintentar/);
+      assert.match(err.message, /No se guardó nada/);
+      return true;
+    });
+  }
+  assert.equal(calls, 0);
+});
+
+function withNavigator(mock, fn) {
+  const desc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value: mock });
+  return Promise.resolve().then(fn).finally(() => {
+    if (desc) Object.defineProperty(globalThis, 'navigator', desc);
+    else delete globalThis.navigator;
+  });
+}
+
+test('readLocation distingue permiso denegado, timeout y navegador sin geolocalización', async () => {
+  await withNavigator({
+    geolocation: {
+      getCurrentPosition(success, error) {
+        const err = new Error('denied');
+        err.code = 1;
+        error(err);
+      }
+    }
+  }, async () => {
+    let deniedCalls = 0;
+    const geo = globalThis.navigator.geolocation;
+    const original = geo.getCurrentPosition;
+    geo.getCurrentPosition = function (success, error) {
+      deniedCalls += 1;
+      return original(success, error);
+    };
+    const denied = await Checador.readLocation();
+    assert.equal(denied.ok, false);
+    assert.equal(denied.reason, 'denied');
+    assert.equal(denied.location, null);
+    assert.match(denied.message, /permiso de ubicación/);
+    assert.match(denied.message, /permite la ubicación/);
+    assert.match(denied.message, /Reintentar/);
+    assert.match(denied.message, /No se guardó nada/);
+    assert.equal(deniedCalls, 1);
+  });
+
+  await withNavigator({
+    geolocation: {
+      getCurrentPosition(success, error) {
+        const err = new Error('timeout');
+        err.code = 3;
+        error(err);
+      }
+    }
+  }, async () => {
+    let timeoutCalls = 0;
+    const geo = globalThis.navigator.geolocation;
+    const original = geo.getCurrentPosition;
+    geo.getCurrentPosition = function (success, error) {
+      timeoutCalls += 1;
+      return original(success, error);
+    };
+    const timed = await Checador.readLocation({ highTimeoutMs: 25, lowTimeoutMs: 25 });
+    assert.equal(timed.ok, false);
+    assert.equal(timed.reason, 'timeout');
+    assert.match(timed.message, /tardó demasiado/);
+    assert.match(timed.message, /GPS/);
+    assert.match(timed.message, /Reintentar/);
+    assert.equal(timeoutCalls, 2);
+  });
+
+  let coarseCalls = 0;
+  await withNavigator({
+    geolocation: {
+      getCurrentPosition(success, error, options) {
+        coarseCalls += 1;
+        if (options.enableHighAccuracy) {
+          const err = new Error('timeout');
+          err.code = 3;
+          error(err);
+          return;
+        }
+        success({ coords: { latitude: '19.43', longitude: '-99.13', accuracy: '30' } });
+      }
+    }
+  }, async () => {
+    const coarse = await Checador.readLocation({ highTimeoutMs: 25, lowTimeoutMs: 25 });
+    assert.equal(coarse.ok, true);
+    assert.deepEqual(coarse.location, { lat: 19.43, lng: -99.13, accuracy: 30 });
+    assert.equal(coarseCalls, 2);
+  });
+
+  await withNavigator({
+    geolocation: {
+      getCurrentPosition(success, error) {
+        const err = new Error('unavailable');
+        err.code = 2;
+        error(err);
+      }
+    }
+  }, async () => {
+    const unavailable = await Checador.readLocation({ highTimeoutMs: 25, lowTimeoutMs: 25 });
+    assert.equal(unavailable.reason, 'unavailable');
+    assert.match(unavailable.message, /Activa la ubicación o el GPS/);
+  });
+
+  await withNavigator({
+    geolocation: {
+      getCurrentPosition() {}
+    }
+  }, async () => {
+    const stalled = await Checador.readLocation({ highTimeoutMs: 20, lowTimeoutMs: 20 });
+    assert.equal(stalled.reason, 'timeout');
+    assert.match(stalled.message, /No se guardó nada/);
+  });
+
+  await withNavigator({}, async () => {
+    const missing = await Checador.readLocation();
+    assert.equal(missing.reason, 'unsupported');
+    assert.match(missing.message, /Chrome o Safari/);
+    assert.match(missing.message, /No se guardó nada/);
+  });
+
+  await withNavigator({
+    geolocation: {
+      getCurrentPosition(success) {
+        success({ coords: { latitude: 120, longitude: 10, accuracy: 4 } });
+      }
+    }
+  }, async () => {
+    const invalid = await Checador.readLocation({ highTimeoutMs: 25, lowTimeoutMs: 25 });
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.reason, 'invalid');
+    assert.match(invalid.message, /No llegó una ubicación válida/);
+  });
+});
+
+test('el SQL 9 exige ubicación en checadas nuevas y no toca el historial', () => {
+  const sql = read('sql/09_ubicacion_obligatoria.sql');
+  assert.match(sql, /BEFORE INSERT OR UPDATE/);
+  assert.match(sql, /kiosk_attendance_require_location/);
+  assert.match(sql, /OLD\.lat IS NOT NULL/);
+  assert.match(sql, /v_ok IS NOT TRUE/);
+  assert.match(sql, /No se registró la asistencia/);
+  assert.match(sql, /NO se ejecutó contra la base/);
+  const code = stripSqlComments(sql);
+  assert.doesNotMatch(code, /SET NOT NULL/i);
+  assert.doesNotMatch(code, /UPDATE\s+public\.kiosk_attendance/i);
+  assert.doesNotMatch(code, /DELETE\s+FROM\s+public\.kiosk_attendance/i);
+  assert.equal(ownsStorageTable(sql), false);
+  assert.match(read('README-checador.md'), /09_ubicacion_obligatoria\.sql/);
+  assert.match(read('kiosk-check-in.html'), /Buscando la ubicación/);
 });
