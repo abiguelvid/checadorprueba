@@ -1,9 +1,12 @@
--- Checador · paso 9
+-- Checador · paso 10
 -- Festivos de toda la empresa y vacaciones por empleado.
 --
 -- NO se ejecutó contra la base. Córralo en el SQL Editor quien administra
--- Supabase, después de leerlo. Se puede correr más de una vez.
--- No borra checadas, fotos, empleados ni la bitácora. No toca el kiosko.
+-- Supabase, después de leerlo. Va después de sql/09_ubicacion_obligatoria.sql
+-- en la numeración; no lo modifica y no depende de él. Se puede correr más
+-- de una vez.
+-- No borra checadas, fotos, empleados ni la bitácora. No toca el kiosko
+-- ni la regla de ubicación obligatoria.
 --
 -- Qué deja:
 --   * public.kiosk_holidays: un día y un nombre (ej. 25 dic, Navidad).

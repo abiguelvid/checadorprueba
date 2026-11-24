@@ -8,7 +8,7 @@ Estas páginas son HTML estático (GitHub Pages):
 | --- | --- | --- |
 | Tablero | `external-check-in-dashboard.html` | Ver asistencia, mapa y CSV |
 | Admin | `admin-empleados.html` | Registros con mapa, altas y bajas |
-| Kiosko | `kiosk-check-in.html` | Entrada y salida, con foto obligatoria y ubicación si el navegador la da |
+| Kiosko | `kiosk-check-in.html` | Entrada, salida y comida, con ubicación obligatoria. Entrada y salida además piden foto |
 
 Cuando este fork publique GitHub Pages, las rutas quedan así:
 
@@ -29,7 +29,8 @@ Para la foto y la bitácora hay que correr, en el SQL Editor y en este orden:
 3. `sql/07_politica_insert_foto.sql` — corrige la política de subida.
 4. `sql/08_comida_kiosk_attendance.sql` — habilita salida a comer y regreso. Entrada y salida siguen funcionando si este archivo todavía no se corre; los botones de comida avisan y no registran.
 5. `sql/05_retencion_fotos_asistencia.sql` — opcional. Solo crea funciones para listar fotos de más de 90 días y, después, limpiar la ruta. **No borra archivos y no queda programado.** El cron de ejemplo está comentado.
-6. `sql/09_festivos_y_vacaciones.sql` — festivos de toda la empresa y vacaciones por persona. Sin este archivo el kiosko y el tablero siguen igual; la admin avisa que falta correrlo. No precarga días: la responsable los captura en la pantalla.
+6. `sql/09_ubicacion_obligatoria.sql` — todavía no se corre. Rechaza checadas **nuevas** sin lat/lng válidos, vengan de esta página o de otro cliente. No rellena ni borra las que ya están sin ubicación, y esas filas viejas se pueden seguir actualizando.
+7. `sql/10_festivos_y_vacaciones.sql` — festivos de toda la empresa y vacaciones por persona. Sin este archivo el kiosko y el tablero siguen igual; la admin avisa que falta correrlo. No precarga días: la responsable los captura en la pantalla. No cambia la ubicación obligatoria del paso 9.
 
 **No corras el paso 3** mientras el kiosko y la admin tengan que seguir con la llave anon y el esquema actual. `sql/03_seguridad_pin_y_admin.sql` queda para más adelante. Si algún día se corre, su `register_attendance` ya pide la foto y la huella.
 
@@ -39,15 +40,15 @@ Los PIN asignados no se republican en este documento. Están en la base y se con
 
 ## Kiosko
 
-`kiosk-check-in.html` sigue pidiendo el PIN igual que antes. Al pulsar Entrada o Salida pide una foto y, aparte, la ubicación.
+`kiosk-check-in.html` sigue pidiendo el PIN igual que antes. Al pulsar cualquier botón pide primero la ubicación. Entrada y salida, solo si esa ubicación es válida, piden la foto.
 
 - La cámara es la frontal (`facingMode: user`). Hay vista previa, se toma la foto y se puede repetir.
 - Sin foto no hay checada. Si niegan el permiso, no hay cámara o falla, sale un mensaje en español y **no se escribe el registro**.
 - La foto se comprime a JPEG de máximo 640 px de ancho y se sube al bucket privado `attendance-photos`, en `empleado/fecha/archivo.jpg`. La ruta queda en `photo_path`.
 - Antes de la primera foto de ese navegador aparece un aviso. El texto se edita en `AVISO_FOTO`, dentro de `checador.js`. Si lo cambias, sube `AVISO_FOTO_VERSION` para que el kiosco lo vuelva a mostrar.
-- La ubicación se pide al abrir y otra vez al marcar. Si la persona acepta, el registro guarda `lat`, `lng` y `accuracy`. Si niega el permiso, tarda demasiado o el navegador falla, **la checada se guarda igual**, con esas columnas vacías, siempre que la foto sí se haya guardado.
+- La ubicación es obligatoria en entrada, salida, salida a comer y regreso. Se pide al abrir y otra vez al marcar, antes de la foto y antes de guardar. Si el permiso está denegado, el GPS no responde, pasa el tiempo de espera o el navegador no tiene geolocalización, **no se guarda nada** y la pantalla dice cómo activarlo, con un botón Reintentar.
 - Un doble clic, o la misma acción repetida en menos de un minuto, no crea otro renglón. Una salida justo después de una entrada sí se guarda.
-- La app de Render no está en este repo, no manda coordenadas y no manda foto. La columna acepta vacío para no romper ese otro cliente. El aparato de Nanofactor tiene que abrir esta página.
+- Hasta que se corra el SQL 9, otro cliente todavía puede insertar sin coordenadas. Ese archivo, cuando se corre, también rechaza esos insert nuevos. El aparato de Nanofactor tiene que abrir esta página.
 - La foto guarda también su huella SHA-256 en `photo_sha256`.
 - Publica la página cuando quieras: entrada y salida siguen igual si el SQL 8 no se ha corrido. La comida pide ese archivo antes de usarse.
 
@@ -62,7 +63,7 @@ Los PIN asignados no se republican en este documento. Están en la base y se con
 
 **Cerrar sesión** olvida el código en esa pestaña.
 
-En la misma página, **Días que no cuentan como falta** (hace falta el SQL 9):
+En la misma página, **Días que no cuentan como falta** (hace falta el SQL 10):
 
 1. **Festivo:** fecha y nombre, por ejemplo 25/12/2026 Navidad, y **Agregar festivo**. **Editar** y **Borrar** están en la fila. Aplica a toda la empresa.
 2. **Agregar descanso obligatorio de ese año** propone los de la LFT artículo 74 (Año Nuevo, Constitución, Juárez, Trabajo, Independencia, Revolución, Navidad y, cada seis años, el 1 de diciembre). No pisa los que ya están. Después se pueden cambiar el nombre o borrar. El día de la elección no viene incluido.
@@ -92,7 +93,7 @@ El tablero de calendario sigue mostrando el mapa del día y el CSV con latitud, 
 
 1. Corre el SQL 4 en Supabase y recarga el kiosco con HTTPS (la cámara no abre en una página suelta).
 2. Escribe un PIN válido y pulsa Entrada. La primera vez tiene que salir el aviso. Cancelar no debe crear un registro.
-3. Acepta, toma la foto y úsala. La pantalla dice que la entrada quedó registrada, con o sin ubicación, y con foto.
+3. Acepta, toma la foto y úsala. La pantalla dice que la entrada quedó registrada, con ubicación y con foto. Si niegas la ubicación antes, no abre la cámara y no crea un registro.
 4. Niega la cámara en el navegador: el mensaje pide el permiso y en la admin no aparece una checada nueva.
 5. Entra a la admin, elige a la persona y el día, y pulsa **Ver foto**. La imagen abre. Al minuto ese enlace deja de servir; el botón pide otro.
 
