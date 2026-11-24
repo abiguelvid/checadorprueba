@@ -816,7 +816,7 @@ BEGIN
   IF NOT kiosk_internal.admin_code_ok(p_code) THEN
     RAISE EXCEPTION 'Código de acceso incorrecto' USING ERRCODE = '28000';
   END IF;
-  IF p_table NOT IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests') THEN
+  IF p_table NOT IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests', 'kiosk_holidays') THEN
     RAISE EXCEPTION 'Tabla no válida';
   END IF;
   IF p_record_id IS NULL OR p_record_id !~ '^[0-9A-Za-z-]{1,80}$' THEN
