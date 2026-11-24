@@ -1263,3 +1263,20 @@ test('el SQL 9 exige ubicación en checadas nuevas y no toca el historial', () =
   assert.match(read('README-checador.md'), /09_ubicacion_obligatoria\.sql/);
   assert.match(read('kiosk-check-in.html'), /Buscando la ubicación/);
 });
+
+test('el JS del checador se pide con la huella del archivo', () => {
+  const crypto = require('node:crypto');
+  const hash = crypto.createHash('sha256').update(read('checador.js')).digest('hex').slice(0, 12);
+  const pages = [
+    'kiosk-check-in.html',
+    'admin-empleados.html',
+    'vacaciones.html',
+    'external-check-in-dashboard.html'
+  ];
+  const tag = '<script src="checador.js?v=' + hash + '"></script>';
+  pages.forEach(file => {
+    const html = read(file);
+    assert.equal(html.includes(tag), true, file + ' tiene que cargar ' + tag);
+    assert.equal((html.match(/<script src="checador\.js/g) || []).length, 1, file);
+  });
+});

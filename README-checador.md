@@ -9,6 +9,7 @@ Estas páginas son HTML estático (GitHub Pages):
 | Tablero | `external-check-in-dashboard.html` | Ver asistencia, mapa y CSV |
 | Admin | `admin-empleados.html` | Registros con mapa, altas y bajas |
 | Kiosko | `kiosk-check-in.html` | Entrada, salida y comida, con ubicación obligatoria. Entrada y salida además piden foto |
+| Vacaciones | `vacaciones.html` | Solicitar vacaciones con PIN, o aprobar las del equipo |
 
 Cuando este fork publique GitHub Pages, las rutas quedan así:
 
@@ -17,6 +18,8 @@ Cuando este fork publique GitHub Pages, las rutas quedan así:
 - https://abiguelvid.github.io/checadorprueba/kiosk-check-in.html
 
 Hay que fusionar el cambio a `main` antes de que Pages lo sirva. El tablero enlaza a Admin y a Kiosko.
+
+Esas páginas cargan `checador.js?v=…`. La `v` es el inicio del SHA-256 de ese archivo. GitHub Pages puede guardar el JS anterior unos minutos. Si el HTML nuevo siguiera pidiendo `checador.js` sin versión, el navegador usaría el JS viejo y fallarían funciones nuevas. Al cambiar `checador.js` hay que poner la huella nueva en el kiosko, la admin, vacaciones y el tablero. La prueba lo exige.
 
 ## SQL
 
