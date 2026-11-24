@@ -30,6 +30,7 @@ Para la foto y la bitácora hay que correr, en el SQL Editor y en este orden:
 4. `sql/08_comida_kiosk_attendance.sql` — habilita salida a comer y regreso. Entrada y salida siguen funcionando si este archivo todavía no se corre; los botones de comida avisan y no registran.
 5. `sql/05_retencion_fotos_asistencia.sql` — opcional. Solo crea funciones para listar fotos de más de 90 días y, después, limpiar la ruta. **No borra archivos y no queda programado.** El cron de ejemplo está comentado.
 6. `sql/09_ubicacion_obligatoria.sql` — todavía no se corre. Rechaza checadas **nuevas** sin lat/lng válidos, vengan de esta página o de otro cliente. No rellena ni borra las que ya están sin ubicación, y esas filas viejas se pueden seguir actualizando.
+7. `sql/10_festivos_y_vacaciones.sql` — festivos de toda la empresa, el manager de cada persona y las vacaciones con dos aprobaciones. Sin este archivo el kiosko sigue checando igual. No cambia la ubicación obligatoria del paso 9.
 
 **No corras el paso 3** mientras el kiosko y la admin tengan que seguir con la llave anon y el esquema actual. `sql/03_seguridad_pin_y_admin.sql` queda para más adelante. Si algún día se corre, su `register_attendance` ya pide la foto y la huella.
 
@@ -61,6 +62,19 @@ Los PIN asignados no se republican en este documento. Están en la base y se con
 6. **Borrar** pide confirmación. Si esa persona **ya tiene asistencia**, no se borra la ficha ni se toca `kiosk_attendance`: no sabemos si la base borraría el historial en cascada, y no se cambia esa relación. Si **no** tiene asistencia, solo se quita la ficha. La bitácora, si ya existe, conserva el intento.
 
 **Cerrar sesión** olvida el código en esa pestaña.
+
+En la misma página, **Días que no cuentan como falta** (hace falta el SQL 10):
+
+1. **Festivo:** fecha y nombre, por ejemplo 25/12/2026 Navidad, y **Agregar festivo**. **Editar** y **Borrar** están en la fila. Aplica a toda la empresa.
+2. **Agregar descanso obligatorio de ese año** propone los de la LFT artículo 74 (Año Nuevo, Constitución, Juárez, Trabajo, Independencia, Revolución, Navidad y, cada seis años, el 1 de diciembre). No pisa los que ya están. Después se pueden cambiar el nombre o borrar. El día de la elección no viene incluido.
+3. En la ficha de cada persona, la columna **Manager** elige a su jefe directo. Nadie puede ser su propio manager. Si queda en **Sin manager**, esa persona puede pedir vacaciones, pero el primer visto bueno no existe hasta que RH asigne a alguien.
+4. **Cargar ya aprobadas** es la excepción: RH deja unas vacaciones aprobadas sin las dos firmas. Queda anotado como carga directa. **Aprobar** solo aparece cuando el manager ya dijo que sí. **Rechazar** puede usarse antes o después. **Cancelar** las saca del tablero.
+
+La persona pide las suyas en `vacaciones.html` (también hay un enlace en el kiosko), con su PIN. Ve solo sus solicitudes y, si es manager, las pendientes de su equipo. No entra a la admin.
+
+El orden es manager y después RH. Solo cuando las dos aprueban, o cuando RH cargó la excepción, el día deja de ser falta. Si cualquiera rechaza, queda rechazada. La persona puede cancelar mientras sigue pendiente.
+
+En el tablero, esos días de lunes a viernes dejan de salir como falta. El calendario dice Festivo o Vacaciones y el CSV usa ese texto en vez de «Sin registro». Si alguien sí checó en un festivo, la checada se ve y el día igual no se cuenta como falta. Una solicitud pendiente sigue contando como falta.
 
 ## Cambiar el código de acceso
 
