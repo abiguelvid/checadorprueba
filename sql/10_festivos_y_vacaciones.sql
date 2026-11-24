@@ -395,7 +395,7 @@ BEGIN
   IF p_id IS NULL THEN
     INSERT INTO public.kiosk_holidays (holiday_date, name)
     VALUES (p_date, v_name)
-    RETURNING id INTO v_id;
+    RETURNING public.kiosk_holidays.id INTO v_id;
   ELSE
     UPDATE public.kiosk_holidays h
        SET holiday_date = p_date,
@@ -624,7 +624,7 @@ BEGIN
       'approved', now(), 'RH (carga directa)',
       'Cargada directo por RH, sin las dos aprobaciones.'
     )
-    RETURNING id INTO v_id;
+    RETURNING public.kiosk_vacation_requests.id INTO v_id;
     v_status := 'approved';
     v_source := 'rh_directa';
   ELSE
@@ -863,7 +863,7 @@ BEGIN
   ) VALUES (
     v_id, p_start, p_end, v_note, 'pending_manager', 'solicitud'
   )
-  RETURNING id INTO v_new;
+  RETURNING public.kiosk_vacation_requests.id INTO v_new;
 
   RETURN QUERY
   SELECT v_new, 'pending_manager'::text, p_start, p_end, v_note;
