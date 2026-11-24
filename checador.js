@@ -1268,6 +1268,22 @@
     return status || '—';
   }
 
+  function describeBalance(balance) {
+    if (!balance || typeof balance !== 'object') return '';
+    const parts = [];
+    if (balance.aviso) parts.push(String(balance.aviso));
+    if (balance.fecha_ingreso) {
+      parts.push('Vacaciones de este aniversario: ' + (balance.dias_disponibles ?? 0)
+        + ' disponibles (' + (balance.dias_derecho ?? 0) + ' de derecho, '
+        + (balance.dias_usados ?? 0) + ' usados, '
+        + (balance.dias_pendientes ?? 0) + ' pendientes).');
+    }
+    parts.push('Días personales: ' + (balance.personales_disponibles_anio ?? 0)
+      + ' en el año y ' + (balance.personales_disponibles_mes ?? 0)
+      + ' en este mes. Máximo 5 al año y 2 en el mismo mes.');
+    return parts.join(' ');
+  }
+
   function vacationBlocksOverlap(status) {
     return status === 'approved'
       || status === 'pending_manager'
@@ -1540,7 +1556,9 @@
         p_employee_id: clean.employee_id,
         p_start: clean.start_date,
         p_end: clean.end_date,
-        p_note: clean.note
+        p_note: clean.note,
+        p_type: input && input.request_type === 'personal' ? 'personal' : 'vacaciones',
+        p_forzar: !!(input && input.forzar)
       });
       return rows[0] || null;
     } catch (err) {
@@ -1563,6 +1581,38 @@
   async function adminListManagers(code) {
     try {
       return await rpc('admin_list_managers', { p_code: String(code || '') }) || [];
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminSetHireDate(code, employeeId, fecha) {
+    assertId(employeeId);
+    const clean = fecha ? assertYmdInRange(fecha, 'La fecha de ingreso no es válida') : null;
+    try {
+      const rows = await rpc('admin_set_fecha_ingreso', {
+        p_code: String(code || ''),
+        p_employee_id: employeeId,
+        p_fecha: clean
+      });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminEmployeeBalance(code, employeeId) {
+    assertId(employeeId);
+    try {
+      const rows = await rpc('admin_employee_balance', {
+        p_code: String(code || ''),
+        p_employee_id: employeeId
+      });
+      const row = rows[0];
+      if (row && row.admin_employee_balance) return row.admin_employee_balance;
+      return row || null;
     } catch (err) {
       if (isMissingFunction(err)) throw diasSchemaError();
       throw err;
@@ -1612,7 +1662,8 @@
       manager_name: src.manager_name || '',
       requests: asJsonArray(src.requests),
       team: asJsonArray(src.team),
-      direct_reports: Number(src.direct_reports) || 0
+      direct_reports: Number(src.direct_reports) || 0,
+      balance: src.balance && typeof src.balance === 'object' ? src.balance : null
     };
   }
 
@@ -1638,7 +1689,8 @@
         p_pin: cleanPin,
         p_start: clean.start_date,
         p_end: clean.end_date,
-        p_note: clean.note
+        p_note: clean.note,
+        p_type: input && input.request_type === 'personal' ? 'personal' : 'vacaciones'
       });
       return rows[0] || null;
     } catch (err) {
@@ -1785,6 +1837,7 @@
     validateVacationSpan,
     vacationStatusLabel,
     vacationBlocksOverlap,
+    describeBalance,
     isDiasSchemaError,
     listExcusedCalendar,
     adminListHolidays,
@@ -1795,6 +1848,8 @@
     adminDeleteVacation,
     adminListManagers,
     adminSetManager,
+    adminSetHireDate,
+    adminEmployeeBalance,
     adminDecideVacation,
     vacationPortal,
     vacationRequestCreate,
