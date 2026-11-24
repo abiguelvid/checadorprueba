@@ -36,6 +36,7 @@ Para la foto y la bitácora hay que correr, en el SQL Editor y en este orden:
 7. `sql/10_festivos_y_vacaciones.sql` — festivos de toda la empresa, el manager de cada persona y las vacaciones con dos aprobaciones. Sin este archivo el kiosko sigue checando igual. No cambia la ubicación obligatoria del paso 9. Si este archivo ya se corrió antes del arreglo del `id` ambiguo, no hace falta volver a correrlo entero.
 8. `sql/11_funciones_id_sin_ambiguedad.sql` — primer intento de quitar el `id` ambiguo. Si al solicitar vacaciones el error sigue, corre el paso 9.
 9. `sql/12_id_sin_ambiguedad.sql` — borra cualquier firma vieja de esas funciones y las vuelve a crear con la regla que evita el choque de `id`. No borra solicitudes. Al final muestra una consulta: `vacation_request_create` tiene que salir una sola vez, con argumentos `text, date, date, text`, `fija` en true y `suelto` en false.
+10. `sql/13_bitacora_festivos_vacaciones.sql` — si al solicitar vacaciones dice `Tabla fuera de la bitácora`. Mete solicitudes y festivos en la lista de la bitácora. No borra datos ni apaga la auditoría.
 
 **No corras el paso 3** mientras el kiosko y la admin tengan que seguir con la llave anon y el esquema actual. `sql/03_seguridad_pin_y_admin.sql` queda para más adelante. Si algún día se corre, su `register_attendance` ya pide la foto y la huella.
 

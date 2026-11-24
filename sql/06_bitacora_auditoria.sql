@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS public.kiosk_audit_log (
   CONSTRAINT kiosk_audit_log_hash_chk
     CHECK (prev_hash ~ '^[0-9a-f]{64}$' AND row_hash ~ '^[0-9a-f]{64}$'),
   CONSTRAINT kiosk_audit_log_table_chk
-    CHECK (table_name IN ('kiosk_attendance', 'kiosk_employees'))
+    CHECK (table_name IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests', 'kiosk_holidays'))
 );
 
 COMMENT ON TABLE public.kiosk_audit_log IS
@@ -157,7 +157,7 @@ DECLARE
   v_hash text;
   v_genesis constant text := '0babb132451e906d8a2aa08a94a3f40c8e9887ec79983653ade2050cf9dc7e6a';
 BEGIN
-  IF p_table NOT IN ('kiosk_attendance', 'kiosk_employees') THEN
+  IF p_table NOT IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests', 'kiosk_holidays') THEN
     RAISE EXCEPTION 'Tabla fuera de la bitácora';
   END IF;
   IF p_action NOT IN ('INSERT', 'UPDATE', 'DELETE', 'BASELINE') THEN
@@ -195,6 +195,22 @@ BEGIN
   );
 END;
 $$;
+
+-- Si la tabla ya existía, el CREATE de arriba no cambia el CHECK.
+DO $$
+BEGIN
+  IF to_regclass('public.kiosk_audit_log') IS NULL THEN
+    RETURN;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'kiosk_audit_log_table_chk'
+  ) THEN
+    ALTER TABLE public.kiosk_audit_log DROP CONSTRAINT kiosk_audit_log_table_chk;
+  END IF;
+  ALTER TABLE public.kiosk_audit_log
+    ADD CONSTRAINT kiosk_audit_log_table_chk
+    CHECK (table_name IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests', 'kiosk_holidays'));
+END $$;
 
 -- Puerta para el trigger. Una llamada suelta de la API no trae profundidad de trigger.
 CREATE OR REPLACE FUNCTION kiosk_internal.append_kiosk_audit(

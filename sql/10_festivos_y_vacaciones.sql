@@ -1056,12 +1056,18 @@ BEGIN
 
   ALTER TABLE public.kiosk_audit_log
     ADD CONSTRAINT kiosk_audit_log_table_chk
-    CHECK (table_name IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests'));
+    CHECK (table_name IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests', 'kiosk_holidays'));
 
   IF to_regprocedure('kiosk_internal.audit_kiosk_change()') IS NOT NULL THEN
     DROP TRIGGER IF EXISTS kiosk_vacation_requests_audit ON public.kiosk_vacation_requests;
     CREATE TRIGGER kiosk_vacation_requests_audit
       AFTER INSERT OR UPDATE OR DELETE ON public.kiosk_vacation_requests
+      FOR EACH ROW
+      EXECUTE FUNCTION kiosk_internal.audit_kiosk_change();
+
+    DROP TRIGGER IF EXISTS kiosk_holidays_audit ON public.kiosk_holidays;
+    CREATE TRIGGER kiosk_holidays_audit
+      AFTER INSERT OR UPDATE OR DELETE ON public.kiosk_holidays
       FOR EACH ROW
       EXECUTE FUNCTION kiosk_internal.audit_kiosk_change();
   END IF;
@@ -1100,7 +1106,7 @@ BEGIN
   IF NOT kiosk_internal.admin_code_ok(p_code) THEN
     RAISE EXCEPTION 'Código de acceso incorrecto' USING ERRCODE = '28000';
   END IF;
-  IF p_table NOT IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests') THEN
+  IF p_table NOT IN ('kiosk_attendance', 'kiosk_employees', 'kiosk_vacation_requests', 'kiosk_holidays') THEN
     RAISE EXCEPTION 'Tabla no válida';
   END IF;
   IF p_record_id IS NULL OR p_record_id !~ '^[0-9A-Za-z-]{1,80}$' THEN

@@ -183,3 +183,139 @@ test('las funciones del SQL 10 y 11 no chocan con la columna id', { skip: hasLoc
 
   assert.equal(fs.readFileSync(path.join(root, 'sql/11_funciones_id_sin_ambiguedad.sql'), 'utf8').includes('DELETE FROM'), false);
 });
+
+test('la bitácora acepta solicitudes y festivos después del SQL 13', { skip: hasLocalPostgres() ? false : 'no hay Postgres local' }, () => {
+  const auditDb = 'checador_audit_test';
+  psql('postgres', ['-c', `DROP DATABASE IF EXISTS ${auditDb}`]);
+  psql('postgres', ['-c', `CREATE DATABASE ${auditDb}`]);
+  psql(auditDb, ['-c', `
+    CREATE SCHEMA IF NOT EXISTS kiosk_internal;
+    CREATE TABLE public.kiosk_employees (
+      id uuid PRIMARY KEY,
+      name text NOT NULL,
+      pin text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      manager_id uuid
+    );
+    INSERT INTO public.kiosk_employees (id, name, pin) VALUES
+      ('${LEON}', 'LEON ALBARRAN MENA', '1111'),
+      ('${ABRAHAM}', 'ABRAHAM DEL RIO', '2222');
+    UPDATE public.kiosk_employees SET manager_id = '${LEON}' WHERE id = '${ABRAHAM}';
+    CREATE TABLE public.kiosk_holidays (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      holiday_date date NOT NULL,
+      name text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE public.kiosk_vacation_requests (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      employee_id uuid NOT NULL,
+      start_date date NOT NULL,
+      end_date date NOT NULL,
+      note text,
+      status text NOT NULL,
+      source text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE public.kiosk_audit_log (
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      logged_at timestamptz NOT NULL,
+      table_name text NOT NULL,
+      record_id text NOT NULL,
+      action text NOT NULL,
+      old_row jsonb,
+      new_row jsonb,
+      actor_role text,
+      actor_uid uuid,
+      db_role text NOT NULL,
+      prev_hash text NOT NULL,
+      row_hash text NOT NULL,
+      CONSTRAINT kiosk_audit_log_table_chk
+        CHECK (table_name IN ('kiosk_attendance', 'kiosk_employees'))
+    );
+    CREATE OR REPLACE FUNCTION kiosk_internal.kiosk_audit_hash(
+      p_table text, p_record_id text, p_action text, p_old jsonb, p_new jsonb,
+      p_actor_role text, p_actor_uid uuid, p_db_role text,
+      p_logged_at timestamptz, p_prev_hash text
+    ) RETURNS text LANGUAGE sql AS $$
+      SELECT rpad(md5(coalesce(p_table, '') || coalesce(p_record_id, '') || coalesce(p_action, '')), 64, 'a');
+    $$;
+    CREATE OR REPLACE FUNCTION kiosk_internal.write_kiosk_audit(
+      p_table text, p_record_id text, p_action text, p_old jsonb, p_new jsonb,
+      p_actor_role text, p_actor_uid uuid, p_db_role text
+    ) RETURNS void LANGUAGE plpgsql AS $$
+    BEGIN
+      IF p_table NOT IN ('kiosk_attendance', 'kiosk_employees') THEN
+        RAISE EXCEPTION 'Tabla fuera de la bitácora';
+      END IF;
+    END $$;
+    CREATE OR REPLACE FUNCTION kiosk_internal.audit_kiosk_change()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      PERFORM kiosk_internal.write_kiosk_audit(
+        TG_TABLE_NAME,
+        CASE WHEN TG_OP = 'DELETE' THEN OLD.id::text ELSE NEW.id::text END,
+        TG_OP,
+        CASE WHEN TG_OP = 'DELETE' THEN to_jsonb(OLD) WHEN TG_OP = 'UPDATE' THEN to_jsonb(OLD) ELSE NULL END,
+        CASE WHEN TG_OP = 'DELETE' THEN NULL ELSE to_jsonb(NEW) END,
+        current_user, NULL, current_user
+      );
+      IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER kiosk_vacation_requests_audit
+      AFTER INSERT OR UPDATE OR DELETE ON public.kiosk_vacation_requests
+      FOR EACH ROW EXECUTE FUNCTION kiosk_internal.audit_kiosk_change();
+    CREATE OR REPLACE FUNCTION kiosk_internal.admin_code_ok(p_code text)
+    RETURNS boolean LANGUAGE sql AS $$ SELECT p_code = 'nfg-rh' $$;
+  `]);
+
+  let blocked = '';
+  try {
+    psql(auditDb, ['-c', `
+      INSERT INTO public.kiosk_vacation_requests (
+        employee_id, start_date, end_date, note, status, source
+      ) VALUES (
+        '${ABRAHAM}', DATE '2026-12-15', DATE '2026-12-17', 'graduacion', 'pending_manager', 'solicitud'
+      )
+    `]);
+  } catch (err) {
+    blocked = String(err.stderr || err.message);
+  }
+  assert.match(blocked, /Tabla fuera de la bitácora/);
+  const none = psql(auditDb, ['-tAc', 'SELECT count(*) FROM public.kiosk_vacation_requests']);
+  assert.equal(none.trim(), '0');
+
+  psqlFile(auditDb, path.join(__dirname, 'sql/13_bitacora_festivos_vacaciones.sql'));
+  psql(auditDb, ['-c', `
+    INSERT INTO public.kiosk_vacation_requests (
+      employee_id, start_date, end_date, note, status, source
+    ) VALUES (
+      '${ABRAHAM}', DATE '2026-12-15', DATE '2026-12-17', 'graduacion', 'pending_manager', 'solicitud'
+    );
+    INSERT INTO public.kiosk_holidays (holiday_date, name) VALUES (DATE '2026-12-25', 'Navidad');
+    UPDATE public.kiosk_vacation_requests
+       SET status = 'pending_hr'
+     WHERE employee_id = '${ABRAHAM}';
+  `]);
+  const saved = psql(auditDb, ['-tAc', 'SELECT count(*) FROM public.kiosk_vacation_requests']);
+  const holidays = psql(auditDb, ['-tAc', 'SELECT count(*) FROM public.kiosk_holidays']);
+  const audited = psql(auditDb, ['-tAc', `
+    SELECT count(DISTINCT table_name) FROM public.kiosk_audit_log
+    WHERE table_name IN ('kiosk_vacation_requests', 'kiosk_holidays')
+  `]);
+  assert.equal(saved.trim(), '1');
+  assert.equal(holidays.trim(), '1');
+  assert.equal(audited.trim(), '2');
+
+  const check = psql(auditDb, ['-tAc', `
+    SELECT (p.prosrc LIKE '%kiosk_vacation_requests%')::text
+      || '|' || (p.prosrc LIKE '%kiosk_holidays%')::text
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'kiosk_internal' AND p.proname = 'write_kiosk_audit'
+  `]);
+  assert.equal(check.trim(), 'true|true');
+});
