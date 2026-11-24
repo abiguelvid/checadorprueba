@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nanofactor · Vacaciones</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      background: #f5f4f1;
+      color: #1a1a18;
+      min-height: 100vh;
+      padding: 32px 20px 60px;
+    }
+    .page { max-width: 860px; margin: 0 auto; }
+    h2 { font-family: 'Syne', sans-serif; font-size: 18px; margin-bottom: 14px; }
+    .section { margin-bottom: 22px; }
+    .header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; }
+    .brand { font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: #888; margin-bottom: 4px; }
+    .title { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800; }
+    a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+    .btn {
+      padding: 8px 16px; background: #1a1a18; color: #f5f4f1; border: none;
+      border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 11px;
+      letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer;
+    }
+    .btn:hover { background: #3a3a38; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-outline { background: #fff; color: #1a1a18; border: 1px solid #d8d6d0; }
+    .btn-danger { background: #fff; color: #8c2020; border: 1px solid #e4c8c8; text-transform: none; letter-spacing: 0.04em; padding: 6px 10px; }
+    .card { background: #fff; border: 1px solid #e8e6e0; border-radius: 6px; padding: 22px; }
+    .gate { max-width: 420px; margin: 40px auto 0; }
+    .note { color: #666; font-size: 12px; line-height: 1.6; margin: 8px 0 18px; }
+    label { display: block; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: #888; margin-bottom: 6px; }
+    input[type="password"], input[type="text"], input[type="date"] {
+      width: 100%; background: #fff; border: 1px solid #d8d6d0; border-radius: 4px;
+      font-family: 'DM Mono', monospace; font-size: 14px; color: #1a1a18; padding: 10px 12px; outline: none;
+    }
+    .gate .btn { margin-top: 14px; width: 100%; }
+    .status-bar { font-size: 12px; color: #888; min-height: 18px; margin: 14px 0; }
+    .status-bar.error { color: #b03030; }
+    .status-bar.ok { color: #3a6e1a; }
+    .form-grid { display: grid; grid-template-columns: 0.7fr 0.7fr 1fr auto; gap: 10px; align-items: end; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e8e6e0; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eee; vertical-align: middle; }
+    th { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #888; font-weight: 500; background: #faf9f6; }
+    .empty { padding: 28px 12px; color: #888; text-align: center; }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .table-wrap { overflow-x: auto; }
+    .foot { margin-top: 22px; display: flex; gap: 16px; }
+    .foot a { color: #666; font-size: 12px; }
+    @media (max-width: 720px) { .form-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div>
+      <div class="brand">Nanofactor · Vacaciones</div>
+      <div class="title">Solicitar o aprobar</div>
+    </div>
+  </div>
+
+  <section class="card gate" id="gate">
+    <label for="pin">Tu PIN</label>
+    <input id="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" />
+    <p class="note">Es el mismo PIN del kiosko. Solo ves tus solicitudes. Si eres manager, también las que tu equipo tiene pendientes de tu visto bueno. No abre la admin.</p>
+    <button class="btn" id="btnEnter" type="button">Entrar</button>
+    <div class="status-bar" id="gateStatus" role="status"></div>
+  </section>
+
+  <section id="app" hidden>
+    <div class="card section">
+      <h2 id="hello">Hola</h2>
+      <p class="note" id="managerNote"></p>
+      <form id="reqForm">
+        <div class="form-grid">
+          <div>
+            <label for="start">Inicio</label>
+            <input id="start" type="date" required />
+          </div>
+          <div>
+            <label for="end">Fin</label>
+            <input id="end" type="date" required />
+          </div>
+          <div>
+            <label for="note">Nota (opcional)</label>
+            <input id="note" type="text" maxlength="280" autocomplete="off" />
+          </div>
+          <button class="btn" id="btnAsk" type="submit">Solicitar</button>
+        </div>
+      </form>
+      <div class="status-bar" id="askStatus" role="status"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Inicio</th>
+              <th>Fin</th>
+              <th>Nota</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="mine"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card section" id="teamCard" hidden>
+      <h2>Solicitudes de tu equipo</h2>
+      <p class="note">Solo las que esperan tu visto bueno. Si apruebas, pasan a RH. Si rechazas, se cierran. No ves solicitudes de otras personas.</p>
+      <div class="status-bar" id="teamStatus" role="status"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Persona</th>
+              <th>Inicio</th>
+              <th>Fin</th>
+              <th>Nota</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="team"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <button class="btn btn-outline" id="btnLeave" type="button">Salir</button>
+  </section>
+
+  <div class="foot">
+    <a href="kiosk-check-in.html">Kiosko</a>
+  </div>
+</div>
+<script src="checador.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  let pin = '';
+  let portal = null;
+
+  function setStatus(el, msg, type) {
+    el.textContent = msg || '';
+    el.className = 'status-bar' + (type ? ' ' + type : '');
+  }
+
+  function render() {
+    $('hello').textContent = 'Hola, ' + (portal.name || '');
+    $('managerNote').textContent = portal.manager_name
+      ? 'Tu manager es ' + portal.manager_name + '. Primero aprueba esa persona y después RH. Hasta que las dos aprueben, estos días siguen contando como falta.'
+      : 'Todavía no tienes manager asignado. Puedes enviar la solicitud: queda esperando. Nadie puede dar el primer visto bueno hasta que RH asigne a tu manager en la admin. RH no la aprueba saltándose ese paso.';
+
+    const mine = $('mine');
+    mine.replaceChildren();
+    const rows = portal.requests || [];
+    if (!rows.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.className = 'empty';
+      td.textContent = 'No tienes solicitudes.';
+      tr.appendChild(td);
+      mine.appendChild(tr);
+    } else {
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        const start = document.createElement('td');
+        start.textContent = Checador.formatYmd(row.start_date);
+        const end = document.createElement('td');
+        end.textContent = Checador.formatYmd(row.end_date);
+        const note = document.createElement('td');
+        note.textContent = row.note || '—';
+        const state = document.createElement('td');
+        let label = Checador.vacationStatusLabel(row.status);
+        if (row.status === 'rejected') {
+          const why = row.hr_reason || row.manager_reason;
+          if (why) label += ' · ' + why;
+        }
+        state.textContent = label;
+        const actions = document.createElement('td');
+        if (row.status === 'pending_manager' || row.status === 'pending_hr') {
+          const cancel = document.createElement('button');
+          cancel.type = 'button';
+          cancel.className = 'btn btn-danger';
+          cancel.textContent = 'Cancelar';
+          cancel.addEventListener('click', () => cancelRequest(row));
+          actions.appendChild(cancel);
+        }
+        tr.append(start, end, note, state, actions);
+        mine.appendChild(tr);
+      });
+    }
+
+    const team = portal.team || [];
+    $('teamCard').hidden = !(portal.direct_reports > 0);
+    const body = $('team');
+    body.replaceChildren();
+    if (!team.length && portal.direct_reports > 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.className = 'empty';
+      td.textContent = 'Nadie de tu equipo tiene una solicitud esperándote.';
+      tr.appendChild(td);
+      body.appendChild(tr);
+    }
+    team.forEach(row => {
+      const tr = document.createElement('tr');
+      const who = document.createElement('td');
+      who.textContent = row.employee_name || '—';
+      const start = document.createElement('td');
+      start.textContent = Checador.formatYmd(row.start_date);
+      const end = document.createElement('td');
+      end.textContent = Checador.formatYmd(row.end_date);
+      const note = document.createElement('td');
+      note.textContent = row.note || '—';
+      const actions = document.createElement('td');
+      actions.className = 'row-actions';
+      const ok = document.createElement('button');
+      ok.type = 'button';
+      ok.className = 'btn btn-outline';
+      ok.textContent = 'Aprobar';
+      ok.addEventListener('click', () => decide(row, 'approved'));
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'btn btn-danger';
+      no.textContent = 'Rechazar';
+      no.addEventListener('click', () => decide(row, 'rejected'));
+      actions.append(ok, no);
+      tr.append(who, start, end, note, actions);
+      body.appendChild(tr);
+    });
+  }
+
+  async function refresh() {
+    portal = await Checador.vacationPortal(pin);
+    render();
+  }
+
+  async function enter() {
+    setStatus($('gateStatus'), 'Comprobando…');
+    $('btnEnter').disabled = true;
+    try {
+      pin = $('pin').value.trim();
+      portal = await Checador.vacationPortal(pin);
+      $('gate').hidden = true;
+      $('app').hidden = false;
+      $('pin').value = '';
+      render();
+    } catch (err) {
+      setStatus($('gateStatus'), err.message, 'error');
+    } finally {
+      $('btnEnter').disabled = false;
+    }
+  }
+
+  async function cancelRequest(row) {
+    if (!window.confirm('¿Cancelar la solicitud del ' + Checador.formatYmd(row.start_date) + ' al ' + Checador.formatYmd(row.end_date) + '?')) return;
+    setStatus($('askStatus'), 'Cancelando…');
+    try {
+      await Checador.vacationRequestCancel(pin, row.id);
+      await refresh();
+      setStatus($('askStatus'), 'Solicitud cancelada.', 'ok');
+    } catch (err) {
+      setStatus($('askStatus'), err.message, 'error');
+    }
+  }
+
+  async function decide(row, decision) {
+    let reason = '';
+    if (decision === 'rejected') {
+      const typed = window.prompt('Motivo del rechazo (opcional). Cancelar no rechaza la solicitud.');
+      if (typed === null) return;
+      reason = typed;
+    } else if (!window.confirm('¿Aprobar la solicitud de ' + (row.employee_name || 'tu equipo') + '? Después la revisa RH.')) {
+      return;
+    }
+    setStatus($('teamStatus'), 'Guardando…');
+    try {
+      await Checador.vacationManagerDecide(pin, row.id, decision, reason);
+      await refresh();
+      setStatus($('teamStatus'), decision === 'approved' ? 'Aprobada. Ahora la ve RH.' : 'Rechazada.', 'ok');
+    } catch (err) {
+      setStatus($('teamStatus'), err.message, 'error');
+    }
+  }
+
+  $('btnEnter').addEventListener('click', enter);
+  $('pin').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') enter(); });
+  $('pin').addEventListener('input', () => { $('pin').value = $('pin').value.replace(/\D/g, '').slice(0, 4); });
+  $('reqForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    $('btnAsk').disabled = true;
+    setStatus($('askStatus'), 'Enviando…');
+    try {
+      await Checador.vacationRequestCreate(pin, {
+        start_date: $('start').value,
+        end_date: $('end').value,
+        note: $('note').value
+      });
+      $('start').value = '';
+      $('end').value = '';
+      $('note').value = '';
+      await refresh();
+      setStatus($('askStatus'), portal.manager_name
+        ? 'Solicitud enviada. La tiene que aprobar tu manager y después RH.'
+        : 'Solicitud enviada. Falta que RH asigne a tu manager para que pueda aprobarla.', 'ok');
+    } catch (err) {
+      setStatus($('askStatus'), err.message, 'error');
+    } finally {
+      $('btnAsk').disabled = false;
+    }
+  });
+  $('btnLeave').addEventListener('click', () => {
+    pin = '';
+    portal = null;
+    $('app').hidden = true;
+    $('gate').hidden = false;
+    setStatus($('gateStatus'), '');
+    setStatus($('askStatus'), '');
+    setStatus($('teamStatus'), '');
+  });
+</script>
+</body>
+</html>

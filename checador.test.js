@@ -965,8 +965,9 @@ test('festivos y vacaciones se guardan con el código de admin y el tablero los 
     if (url.includes('/kiosk_holidays?')) {
       return jsonResponse(200, [{ holiday_date: '2026-12-25', name: 'Navidad' }]);
     }
-    if (url.includes('/kiosk_vacations?')) {
+    if (url.includes('/kiosk_approved_vacations?')) {
       assert.equal(url.includes('note'), false);
+      assert.equal(url.includes('pending'), false);
       assert.match(url, new RegExp('employee_id=eq.' + EMP_A));
       return jsonResponse(200, [{ employee_id: EMP_A, start_date: '2026-12-21', end_date: '2026-12-23' }]);
     }
@@ -986,7 +987,17 @@ test('festivos y vacaciones se guardan con el código de admin y el tablero los 
   const sql = stripSqlComments(read('sql/10_festivos_y_vacaciones.sql'));
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
   assert.match(sql, /kiosk_holidays_select/);
-  assert.match(sql, /kiosk_vacations_select/);
+  assert.match(sql, /kiosk_vacation_requests_select_approved/);
+  assert.match(sql, /status = 'approved'/);
+  assert.match(sql, /pending_manager/);
+  assert.match(sql, /pending_hr/);
+  assert.match(sql, /vacation_request_create/);
+  assert.match(sql, /vacation_manager_decide/);
+  assert.match(sql, /admin_set_manager/);
+  assert.match(sql, /manager_id/);
+  assert.match(sql, /kiosk_vacation_requests_audit/);
+  assert.match(sql, /rh_directa/);
+  assert.doesNotMatch(sql, /register_attendance/);
   assert.match(sql, /FOR SELECT/);
   assert.match(sql, /TO anon, authenticated/);
   assert.match(sql, /kiosk_internal\.admin_code_ok/);
@@ -1002,8 +1013,7 @@ test('festivos y vacaciones se guardan con el código de admin y el tablero los 
   assert.doesNotMatch(sql, /FOR\s+ALL/i);
   assert.doesNotMatch(sql, /GRANT\s+(INSERT|UPDATE|DELETE|ALL)/i);
   assert.doesNotMatch(sql, /GRANT SELECT\s*\([^)]*\bnote\b/i);
-  assert.doesNotMatch(sql, /register_attendance/);
-  assert.match(read('sql/10_festivos_y_vacaciones.sql'), /No se precargan días/);
+  assert.match(read('sql/10_festivos_y_vacaciones.sql'), /No se precargan/);
   assert.equal(/^\s*select\s+cron\.schedule/im.test(sql), false);
 
   const admin = read('admin-empleados.html');
@@ -1012,8 +1022,17 @@ test('festivos y vacaciones se guardan con el código de admin y el tablero los 
   assert.ok(admin.indexOf('id="gate"') < admin.indexOf('id="app"'));
   assert.ok(admin.indexOf('id="app"') < admin.indexOf('id="diasCard"'));
   assert.match(admin, /Agregar festivo/);
-  assert.match(admin, /Agregar vacaciones/);
+  assert.match(admin, /Cargar ya aprobadas/);
+  assert.match(admin, /adminSetManager/);
   assert.match(admin, /Agregar descanso obligatorio de ese año/);
+  const portal = read('vacaciones.html');
+  assert.match(portal, /vacationPortal/);
+  assert.match(portal, /Solicitar/);
+  assert.match(portal, /Solicitudes de tu equipo/);
+  assert.equal(portal.includes('diasCard'), false);
+  assert.equal(portal.includes('adminList'), false);
+  assert.match(kiosk, /vacaciones\.html/);
+  assert.match(kiosk, /Buscando la ubicación/);
   assert.match(admin, /adminSaveHoliday/);
   assert.match(admin, /adminSaveVacation/);
   assert.equal(kiosk.includes('diasCard'), false);
@@ -1023,6 +1042,56 @@ test('festivos y vacaciones se guardan con el código de admin y el tablero los 
   assert.match(board, /summarizePeriod/);
   assert.match(board, /No cuenta como falta/);
   assert.match(read('README-checador.md'), /sql\/10_festivos_y_vacaciones\.sql/);
+});
+
+test('el portal de vacaciones solo habla con el PIN de quien entra', async () => {
+  assert.equal(Checador.vacationStatusLabel('pending_manager'), 'Pendiente del manager');
+  assert.equal(Checador.vacationStatusLabel('pending_hr'), 'Pendiente de RH');
+  assert.equal(Checador.vacationStatusLabel('approved'), 'Aprobada');
+  assert.equal(Checador.vacationBlocksOverlap('pending_hr'), true);
+  assert.equal(Checador.vacationBlocksOverlap('approved'), true);
+  assert.equal(Checador.vacationBlocksOverlap('rejected'), false);
+  assert.equal(Checador.vacationBlocksOverlap('cancelled'), false);
+
+  Checador.resetClientState();
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, body: options && options.body ? JSON.parse(options.body) : null });
+    if (url.endsWith('/rpc/vacation_portal')) {
+      return jsonResponse(200, [{
+        employee_id: EMP_A,
+        name: 'Ana',
+        manager_name: null,
+        requests: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001', status: 'pending_manager', start_date: '2026-12-21', end_date: '2026-12-23' }],
+        team: []
+      }]);
+    }
+    if (url.endsWith('/rpc/vacation_request_create')) {
+      return jsonResponse(200, [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002', status: 'pending_manager' }]);
+    }
+    if (url.endsWith('/rpc/vacation_manager_decide')) {
+      return jsonResponse(200, [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001', status: 'pending_hr' }]);
+    }
+    return jsonResponse(500, { message: url });
+  };
+
+  const session = await Checador.vacationPortal('2465');
+  assert.equal(session.name, 'Ana');
+  assert.equal(session.requests[0].status, 'pending_manager');
+  assert.deepEqual(session.team, []);
+  assert.deepEqual(calls[0].body, { p_pin: '2465' });
+  await Checador.vacationRequestCreate('2465', {
+    start_date: '2026-12-21',
+    end_date: '2026-12-23',
+    note: 'puente'
+  });
+  assert.equal(calls[1].body.p_pin, '2465');
+  assert.equal(calls[1].body.p_note, 'puente');
+  assert.equal(calls[1].body.p_employee_id, undefined);
+  await Checador.vacationManagerDecide('3352', 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001', 'approved', '');
+  assert.equal(calls[2].body.p_pin, '3352');
+  assert.equal(calls[2].body.p_decision, 'approved');
+  await assert.rejects(() => Checador.vacationPortal('12'), /4 dígitos/);
 });
 
 test('sin ubicación no llama a la base en ningún marcaje', async () => {

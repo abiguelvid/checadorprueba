@@ -217,6 +217,7 @@
 
       <div class="split">
         <h3 class="subhead">Vacaciones</h3>
+        <p class="note">Lo normal es que la persona las pida en Vacaciones, con su PIN. Aquí RH da el visto bueno final cuando el manager ya aprobó, o carga unas ya aprobadas si es una excepción. Esa carga queda anotada en la solicitud y, si la bitácora existe, también ahí.</p>
         <form id="vacForm">
           <div class="form-vacation">
             <div>
@@ -235,7 +236,7 @@
               <label for="vacNote">Nota (opcional)</label>
               <input id="vacNote" type="text" maxlength="280" autocomplete="off" placeholder="Puente familiar" />
             </div>
-            <button class="btn" id="btnVacSave" type="submit">Agregar vacaciones</button>
+            <button class="btn" id="btnVacSave" type="submit">Cargar ya aprobadas</button>
           </div>
           <div class="suggest">
             <button class="btn btn-outline" id="vacCancel" type="button" hidden>Cancelar edición</button>
@@ -258,6 +259,7 @@
                 <th>Inicio</th>
                 <th>Fin</th>
                 <th>Nota</th>
+                <th>Estado</th>
                 <th></th>
               </tr>
             </thead>
@@ -300,6 +302,7 @@
           <th>Nombre</th>
           <th>PIN</th>
           <th>Alta</th>
+          <th>Manager</th>
           <th></th>
         </tr>
       </thead>
@@ -337,6 +340,7 @@
   let diasReady = false;
   let holidayEditId = null;
   let vacationEditId = null;
+  let managerOf = {};
 
   function setStatus(el, msg, type) {
     el.textContent = msg || '';
@@ -430,7 +434,7 @@
     $('vacStart').value = '';
     $('vacEnd').value = '';
     $('vacNote').value = '';
-    $('btnVacSave').textContent = 'Agregar vacaciones';
+    $('btnVacSave').textContent = 'Cargar ya aprobadas';
     $('vacCancel').hidden = true;
     renderVacations();
   }
@@ -488,11 +492,11 @@
     if (!rows.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 5;
+      td.colSpan = 6;
       td.className = 'empty';
       td.textContent = vacations.length
         ? 'Nadie de ese filtro tiene vacaciones.'
-        : (diasReady ? 'No hay vacaciones.' : 'Las vacaciones aparecen aquí cuando la base ya tiene la tabla.');
+        : (diasReady ? 'No hay solicitudes.' : 'Las vacaciones aparecen aquí cuando la base ya tiene la tabla.');
       tr.appendChild(td);
       body.appendChild(tr);
       return;
@@ -508,20 +512,49 @@
       end.textContent = Checador.formatYmd(row.end_date);
       const note = document.createElement('td');
       note.textContent = row.note || '—';
+      const state = document.createElement('td');
+      state.textContent = Checador.vacationStatusLabel(row.status);
+      if (row.manager_reason) state.textContent += ' · manager: ' + row.manager_reason;
+      if (row.hr_reason && row.source === 'solicitud') state.textContent += ' · RH: ' + row.hr_reason;
+      if (row.source === 'rh_directa') state.textContent += ' · carga directa';
       const actions = document.createElement('td');
       actions.className = 'row-actions';
-      const edit = document.createElement('button');
-      edit.type = 'button';
-      edit.className = 'btn btn-outline photo-btn';
-      edit.textContent = 'Editar';
-      edit.addEventListener('click', () => beginVacationEdit(row));
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'btn btn-danger';
-      del.textContent = 'Borrar';
-      del.addEventListener('click', () => removeVacation(row));
-      actions.append(edit, del);
-      tr.append(who, start, end, note, actions);
+      if (row.status === 'pending_hr') {
+        const ok = document.createElement('button');
+        ok.type = 'button';
+        ok.className = 'btn btn-outline photo-btn';
+        ok.textContent = 'Aprobar';
+        ok.addEventListener('click', () => decideVacation(row, 'approved'));
+        actions.appendChild(ok);
+      }
+      if (row.status === 'pending_manager' || row.status === 'pending_hr') {
+        const no = document.createElement('button');
+        no.type = 'button';
+        no.className = 'btn btn-outline photo-btn';
+        no.textContent = 'Rechazar';
+        no.addEventListener('click', () => decideVacation(row, 'rejected'));
+        actions.appendChild(no);
+      }
+      if (row.status !== 'cancelled') {
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'btn btn-outline photo-btn';
+        edit.textContent = 'Editar';
+        edit.addEventListener('click', () => beginVacationEdit(row));
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'btn btn-danger';
+        del.textContent = 'Cancelar';
+        del.addEventListener('click', () => removeVacation(row));
+        actions.append(edit, del);
+      }
+      const hist = document.createElement('button');
+      hist.type = 'button';
+      hist.className = 'btn btn-outline photo-btn';
+      hist.textContent = 'Historial';
+      hist.addEventListener('click', () => showHistory('kiosk_vacation_requests', row.id, (row.employee_name || 'Vacaciones') + ' · ' + Checador.formatYmd(row.start_date)));
+      actions.appendChild(hist);
+      tr.append(who, start, end, note, state, actions);
       body.appendChild(tr);
     });
   }
@@ -544,7 +577,7 @@
     $('vacStart').value = String(row.start_date || '').slice(0, 10);
     $('vacEnd').value = String(row.end_date || '').slice(0, 10);
     $('vacNote').value = row.note || '';
-    $('btnVacSave').textContent = 'Guardar vacaciones';
+    $('btnVacSave').textContent = 'Guardar cambios';
     $('vacCancel').hidden = false;
     renderVacations();
   }
@@ -553,6 +586,10 @@
     try {
       holidays = await Checador.adminListHolidays(accessCode) || [];
       vacations = await Checador.adminListVacations(accessCode) || [];
+      const mgrRows = await Checador.adminListManagers(accessCode) || [];
+      managerOf = {};
+      mgrRows.forEach(row => { managerOf[row.id] = row.manager_id || ''; });
+      render();
       diasReady = true;
       $('diasSchema').hidden = true;
       $('diasSchema').textContent = '';
@@ -590,15 +627,51 @@
     }
   }
 
+  async function saveManager(row, sel) {
+    const previous = managerOf[row.id] || '';
+    setStatus($('appStatus'), 'Guardando manager…');
+    try {
+      await Checador.adminSetManager(accessCode, row.id, sel.value || null);
+      managerOf[row.id] = sel.value || '';
+      const label = sel.value
+        ? (employees.find(item => item.id === sel.value) || {}).name || 'el manager'
+        : 'nadie';
+      setStatus($('appStatus'), 'Manager de ' + (row.name || 'la persona') + ': ' + label + '.', 'ok');
+    } catch (err) {
+      sel.value = previous;
+      setStatus($('appStatus'), err.message, 'error');
+    }
+  }
+
+  async function decideVacation(row, decision) {
+    const who = row.employee_name || employeeName(row.employee_id);
+    let reason = '';
+    if (decision === 'rejected') {
+      const typed = window.prompt('Motivo del rechazo para ' + who + ' (opcional). Cancelar no rechaza la solicitud.');
+      if (typed === null) return;
+      reason = typed;
+    } else if (!window.confirm('¿Aprobar las vacaciones de ' + who + '? Desde ese momento cuentan en el tablero.')) {
+      return;
+    }
+    setStatus($('vacStatus'), 'Guardando la decisión…');
+    try {
+      await Checador.adminDecideVacation(accessCode, row.id, decision, reason);
+      await loadDias();
+      setStatus($('vacStatus'), decision === 'approved' ? 'Aprobadas. Ya cuentan en el tablero.' : 'Rechazadas.', 'ok');
+    } catch (err) {
+      setStatus($('vacStatus'), err.message, 'error');
+    }
+  }
+
   async function removeVacation(row) {
     const who = row.employee_name || employeeName(row.employee_id);
-    if (!window.confirm('¿Borrar las vacaciones de ' + who + ' del ' + Checador.formatYmd(row.start_date) + ' al ' + Checador.formatYmd(row.end_date) + '?')) return;
-    setStatus($('vacStatus'), 'Borrando…');
+    if (!window.confirm('¿Cancelar las vacaciones de ' + who + ' del ' + Checador.formatYmd(row.start_date) + ' al ' + Checador.formatYmd(row.end_date) + '? Dejan de contar en el tablero.')) return;
+    setStatus($('vacStatus'), 'Cancelando…');
     try {
       await Checador.adminDeleteVacation(accessCode, row.id);
       if (vacationEditId === row.id) resetVacationForm();
       await loadDias();
-      setStatus($('vacStatus'), 'Se borraron las vacaciones.', 'ok');
+      setStatus($('vacStatus'), 'Quedaron canceladas.', 'ok');
     } catch (err) {
       setStatus($('vacStatus'), err.message, 'error');
     }
@@ -845,7 +918,7 @@
     if (!rows.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 4;
+      td.colSpan = 5;
       td.className = 'empty';
       td.textContent = employees.length ? 'Nadie coincide con la búsqueda.' : 'No hay empleados.';
       tr.appendChild(td);
@@ -862,6 +935,25 @@
       pin.textContent = Checador.padPin(row.pin) || '—';
       const alta = document.createElement('td');
       alta.textContent = fmtAlta(row.created_at);
+      const mgr = document.createElement('td');
+      const sel = document.createElement('select');
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = 'Sin manager';
+      sel.appendChild(none);
+      employees
+        .slice()
+        .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'))
+        .forEach(other => {
+          if (other.id === row.id) return;
+          const opt = document.createElement('option');
+          opt.value = other.id;
+          opt.textContent = other.name;
+          sel.appendChild(opt);
+        });
+      sel.value = managerOf[row.id] || '';
+      sel.addEventListener('change', () => saveManager(row, sel));
+      mgr.appendChild(sel);
       const actions = document.createElement('td');
       actions.className = 'row-actions';
       const hist = document.createElement('button');
@@ -875,7 +967,7 @@
       btn.textContent = 'Borrar';
       btn.addEventListener('click', () => removeEmployee(row));
       actions.append(hist, btn);
-      tr.append(name, pin, alta, actions);
+      tr.append(name, pin, alta, mgr, actions);
       body.appendChild(tr);
     });
   }
@@ -1020,6 +1112,7 @@
       });
       const clash = vacations.some(row => row.id !== clean.id
         && row.employee_id === clean.employee_id
+        && Checador.vacationBlocksOverlap(row.status)
         && Checador.rangesOverlap(
           String(row.start_date).slice(0, 10),
           String(row.end_date).slice(0, 10),
@@ -1030,7 +1123,7 @@
       await Checador.adminSaveVacation(accessCode, clean);
       resetVacationForm();
       await loadDias();
-      setStatus($('vacStatus'), clean.id ? 'Vacaciones actualizadas.' : 'Vacaciones agregadas.', 'ok');
+      setStatus($('vacStatus'), clean.id ? 'Vacaciones actualizadas.' : 'Quedaron cargadas como aprobadas. En la bitácora se ve que fue carga directa de RH.', 'ok');
     } catch (err) {
       setStatus($('vacStatus'), err.message, 'error');
     } finally {

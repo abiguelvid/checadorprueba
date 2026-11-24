@@ -1128,7 +1128,7 @@
   }
 
   async function adminAuditHistory(code, tableName, recordId) {
-    if (tableName !== 'kiosk_attendance' && tableName !== 'kiosk_employees') {
+    if (tableName !== 'kiosk_attendance' && tableName !== 'kiosk_employees' && tableName !== 'kiosk_vacation_requests') {
       throw new Error('Tabla no válida');
     }
     if (!/^[0-9A-Za-z-]{1,80}$/.test(String(recordId || ''))) {
@@ -1259,6 +1259,36 @@
     });
   }
 
+  function vacationStatusLabel(status) {
+    if (status === 'pending_manager') return 'Pendiente del manager';
+    if (status === 'pending_hr') return 'Pendiente de RH';
+    if (status === 'approved') return 'Aprobada';
+    if (status === 'rejected') return 'Rechazada';
+    if (status === 'cancelled') return 'Cancelada';
+    return status || '—';
+  }
+
+  function vacationBlocksOverlap(status) {
+    return status === 'approved'
+      || status === 'pending_manager'
+      || status === 'pending_hr'
+      || status == null
+      || status === '';
+  }
+
+  function asJsonArray(value) {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_) {
+        return [];
+      }
+    }
+    return [];
+  }
+
   function excuseForDay(ymd, holidaysByDate, vacations) {
     const text = String(ymd || '').slice(0, 10);
     if (!isYmd(text)) return null;
@@ -1371,10 +1401,8 @@
     return { id: id, holiday_date: date, name: name };
   }
 
-  function validateVacation(input) {
+  function validateVacationSpan(input) {
     const src = input || {};
-    if (!src.employee_id) throw new Error('Elige a la persona');
-    assertId(src.employee_id);
     const start = assertYmdInRange(src.start_date, 'Elige la fecha de inicio');
     const end = assertYmdInRange(src.end_date, 'Elige la fecha de fin');
     if (end < start) throw new Error('La fecha de fin no puede ser anterior a la de inicio');
@@ -1385,12 +1413,20 @@
     if (note.length > 280) throw new Error('La nota es demasiado larga');
     const id = src.id ? String(src.id) : null;
     if (id) assertId(id);
+    return { id: id, start_date: start, end_date: end, note: note || null };
+  }
+
+  function validateVacation(input) {
+    const src = input || {};
+    if (!src.employee_id) throw new Error('Elige a la persona');
+    assertId(src.employee_id);
+    const span = validateVacationSpan(src);
     return {
-      id: id,
+      id: span.id,
       employee_id: String(src.employee_id),
-      start_date: start,
-      end_date: end,
-      note: note || null
+      start_date: span.start_date,
+      end_date: span.end_date,
+      note: span.note
     };
   }
 
@@ -1434,7 +1470,7 @@
       let vacations = [];
       if (employeeId) {
         vacations = await request(
-          'kiosk_vacations?select=employee_id,start_date,end_date'
+          'kiosk_approved_vacations?select=employee_id,start_date,end_date'
           + '&employee_id=eq.' + employeeId
           + '&start_date=lte.' + to
           + '&end_date=gte.' + from
@@ -1443,7 +1479,7 @@
       }
       return { available: true, holidays: holidays, vacations: vacations };
     } catch (err) {
-      if (isMissingRelation(err, 'kiosk_holidays') || isMissingRelation(err, 'kiosk_vacations')) {
+      if (isMissingRelation(err, 'kiosk_holidays') || isMissingRelation(err, 'kiosk_approved_vacations') || isMissingRelation(err, 'kiosk_vacation_requests')) {
         return { available: false, holidays: [], vacations: [] };
       }
       throw err;
@@ -1518,6 +1554,127 @@
     try {
       await rpc('admin_delete_vacation', { p_code: String(code || ''), p_id: id });
       return true;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminListManagers(code) {
+    try {
+      return await rpc('admin_list_managers', { p_code: String(code || '') }) || [];
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminSetManager(code, employeeId, managerId) {
+    assertId(employeeId);
+    if (managerId) assertId(managerId);
+    try {
+      const rows = await rpc('admin_set_manager', {
+        p_code: String(code || ''),
+        p_employee_id: employeeId,
+        p_manager_id: managerId || null
+      });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function adminDecideVacation(code, id, decision, reason) {
+    assertId(id);
+    if (decision !== 'approved' && decision !== 'rejected') {
+      throw new Error('La decisión tiene que ser aprobar o rechazar');
+    }
+    try {
+      const rows = await rpc('admin_decide_vacation', {
+        p_code: String(code || ''),
+        p_id: id,
+        p_decision: decision,
+        p_reason: reason ? normalizeName(reason) : null
+      });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  function normalizePortal(row) {
+    const src = row || {};
+    return {
+      employee_id: src.employee_id || null,
+      name: src.name || '',
+      manager_name: src.manager_name || '',
+      requests: asJsonArray(src.requests),
+      team: asJsonArray(src.team),
+      direct_reports: Number(src.direct_reports) || 0
+    };
+  }
+
+  async function vacationPortal(pin) {
+    const clean = String(pin || '').trim();
+    if (!isValidPin(clean)) throw new Error('Ingresa un PIN de 4 dígitos');
+    try {
+      const rows = await rpc('vacation_portal', { p_pin: clean });
+      if (!rows[0]) throw new Error('PIN no encontrado');
+      return normalizePortal(rows[0]);
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function vacationRequestCreate(pin, input) {
+    const cleanPin = String(pin || '').trim();
+    if (!isValidPin(cleanPin)) throw new Error('Ingresa un PIN de 4 dígitos');
+    const clean = validateVacationSpan(input);
+    try {
+      const rows = await rpc('vacation_request_create', {
+        p_pin: cleanPin,
+        p_start: clean.start_date,
+        p_end: clean.end_date,
+        p_note: clean.note
+      });
+      return rows[0] || null;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function vacationRequestCancel(pin, id) {
+    const cleanPin = String(pin || '').trim();
+    if (!isValidPin(cleanPin)) throw new Error('Ingresa un PIN de 4 dígitos');
+    assertId(id);
+    try {
+      await rpc('vacation_request_cancel', { p_pin: cleanPin, p_id: id });
+      return true;
+    } catch (err) {
+      if (isMissingFunction(err)) throw diasSchemaError();
+      throw err;
+    }
+  }
+
+  async function vacationManagerDecide(pin, id, decision, reason) {
+    const cleanPin = String(pin || '').trim();
+    if (!isValidPin(cleanPin)) throw new Error('Ingresa un PIN de 4 dígitos');
+    assertId(id);
+    if (decision !== 'approved' && decision !== 'rejected') {
+      throw new Error('La decisión tiene que ser aprobar o rechazar');
+    }
+    try {
+      const rows = await rpc('vacation_manager_decide', {
+        p_pin: cleanPin,
+        p_id: id,
+        p_decision: decision,
+        p_reason: reason ? normalizeName(reason) : null
+      });
+      return rows[0] || null;
     } catch (err) {
       if (isMissingFunction(err)) throw diasSchemaError();
       throw err;
@@ -1625,6 +1782,9 @@
     summarizePeriod,
     validateHoliday,
     validateVacation,
+    validateVacationSpan,
+    vacationStatusLabel,
+    vacationBlocksOverlap,
     isDiasSchemaError,
     listExcusedCalendar,
     adminListHolidays,
@@ -1632,6 +1792,13 @@
     adminDeleteHoliday,
     adminListVacations,
     adminSaveVacation,
-    adminDeleteVacation
+    adminDeleteVacation,
+    adminListManagers,
+    adminSetManager,
+    adminDecideVacation,
+    vacationPortal,
+    vacationRequestCreate,
+    vacationRequestCancel,
+    vacationManagerDecide
   };
 });
