@@ -55,6 +55,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = ''
 AS $$
+#variable_conflict use_column
 BEGIN
   IF to_regprocedure('public.kiosk_admin_ok(text)') IS NOT NULL THEN
     RETURN public.kiosk_admin_ok(p_code);
@@ -215,6 +216,7 @@ RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = public
 AS $$
+#variable_conflict use_column
 BEGIN
   NEW.note := nullif(regexp_replace(btrim(coalesce(NEW.note, '')), '\s+', ' ', 'g'), '');
   NEW.manager_reason := nullif(regexp_replace(btrim(coalesce(NEW.manager_reason, '')), '\s+', ' ', 'g'), '');
@@ -330,6 +332,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 BEGIN
   IF p_pin IS NULL OR btrim(p_pin) !~ '^[0-9]{4}$' THEN
     RETURN;
@@ -353,6 +356,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 BEGIN
   IF NOT kiosk_internal.admin_code_ok(p_code) THEN
     RAISE EXCEPTION 'Código de acceso incorrecto' USING ERRCODE = '28000';
@@ -376,6 +380,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_name text;
   v_id uuid;
@@ -424,6 +429,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_n int := 0;
 BEGIN
@@ -450,6 +456,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 BEGIN
   IF NOT kiosk_internal.admin_code_ok(p_code) THEN
     RAISE EXCEPTION 'Código de acceso incorrecto' USING ERRCODE = '28000';
@@ -473,6 +480,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_name text;
   v_manager_name text;
@@ -538,6 +546,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 BEGIN
   IF NOT kiosk_internal.admin_code_ok(p_code) THEN
     RAISE EXCEPTION 'Código de acceso incorrecto' USING ERRCODE = '28000';
@@ -576,6 +585,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_note text;
   v_id uuid;
@@ -657,6 +667,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_n int := 0;
 BEGIN
@@ -693,6 +704,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_status text;
   v_decision text;
@@ -756,6 +768,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_id uuid;
   v_name text;
@@ -832,6 +845,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_id uuid;
   v_name text;
@@ -876,6 +890,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_id uuid;
   v_status text;
@@ -920,6 +935,7 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 DECLARE
   v_me uuid;
   v_my_name text;
@@ -1076,6 +1092,7 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+#variable_conflict use_column
 BEGIN
   IF to_regclass('public.kiosk_audit_log') IS NULL THEN
     RAISE EXCEPTION 'Falta la bitácora. Corre sql/06_bitacora_auditoria.sql en Supabase.';
