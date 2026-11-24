@@ -34,7 +34,8 @@ Para la foto y la bitácora hay que correr, en el SQL Editor y en este orden:
 5. `sql/05_retencion_fotos_asistencia.sql` — opcional. Solo crea funciones para listar fotos de más de 90 días y, después, limpiar la ruta. **No borra archivos y no queda programado.** El cron de ejemplo está comentado.
 6. `sql/09_ubicacion_obligatoria.sql` — todavía no se corre. Rechaza checadas **nuevas** sin lat/lng válidos, vengan de esta página o de otro cliente. No rellena ni borra las que ya están sin ubicación, y esas filas viejas se pueden seguir actualizando.
 7. `sql/10_festivos_y_vacaciones.sql` — festivos de toda la empresa, el manager de cada persona y las vacaciones con dos aprobaciones. Sin este archivo el kiosko sigue checando igual. No cambia la ubicación obligatoria del paso 9. Si este archivo ya se corrió antes del arreglo del `id` ambiguo, no hace falta volver a correrlo entero.
-8. `sql/11_funciones_id_sin_ambiguedad.sql` — solo si el paso 7 ya se corrió y al solicitar vacaciones Postgres dice `column reference "id" is ambiguous`. Reemplaza tres funciones y no borra solicitudes ni empleados. Una instalación nueva que use el paso 7 ya corregido no lo necesita, pero correrlo igual no daña nada.
+8. `sql/11_funciones_id_sin_ambiguedad.sql` — primer intento de quitar el `id` ambiguo. Si al solicitar vacaciones el error sigue, corre el paso 9.
+9. `sql/12_id_sin_ambiguedad.sql` — borra cualquier firma vieja de esas funciones y las vuelve a crear con la regla que evita el choque de `id`. No borra solicitudes. Al final muestra una consulta: `vacation_request_create` tiene que salir una sola vez, con argumentos `text, date, date, text`, `fija` en true y `suelto` en false.
 
 **No corras el paso 3** mientras el kiosko y la admin tengan que seguir con la llave anon y el esquema actual. `sql/03_seguridad_pin_y_admin.sql` queda para más adelante. Si algún día se corre, su `register_attendance` ya pide la foto y la huella.
 

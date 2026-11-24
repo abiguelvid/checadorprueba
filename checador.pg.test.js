@@ -91,6 +91,13 @@ test('las funciones del SQL 10 y 11 no chocan con la columna id', { skip: hasLoc
     $fn$;
   `;
   psql(DB, ['-c', broken]);
+  psql(DB, ['-c', broken.replace(
+    'p_pin text, p_start date, p_end date, p_note text',
+    'p_pin text, p_start text, p_end text, p_note text'
+  ).replace(
+    "RETURNS TABLE (id uuid, status text, start_date date, end_date date, note text)",
+    "RETURNS TABLE (id uuid, status text, start_date text, end_date text, note text)"
+  )]);
   let ambiguous = '';
   try {
     psql(DB, ['-c', `SELECT * FROM public.vacation_request_create('2222', DATE '2026-12-15', DATE '2026-12-17', 'nota')`]);
@@ -99,7 +106,23 @@ test('las funciones del SQL 10 y 11 no chocan con la columna id', { skip: hasLoc
   }
   assert.match(ambiguous, /column reference "id" is ambiguous/);
 
-  psqlFile(DB, path.join(root, 'sql/11_funciones_id_sin_ambiguedad.sql'));
+  psqlFile(DB, path.join(root, 'sql/12_id_sin_ambiguedad.sql'));
+  const signatures = psql(DB, ['-tAc', `
+    SELECT pg_get_function_identity_arguments(p.oid)
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'vacation_request_create'
+    ORDER BY 1
+  `]).trim();
+  assert.equal(signatures, 'p_pin text, p_start date, p_end date, p_note text');
+  const flags = psql(DB, ['-tAc', `
+    SELECT (p.prosrc LIKE '%#variable_conflict use_column%')::text
+      || '|' || (p.prosrc LIKE '%RETURNING id%')::text
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'vacation_request_create'
+  `]).trim();
+  assert.equal(flags, 'true|false');
   const afterFix = psql(DB, ['-tAc', 'SELECT count(*) FROM public.kiosk_vacation_requests']);
   assert.equal(afterFix.trim(), before.trim());
 
