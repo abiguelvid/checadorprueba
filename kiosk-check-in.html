@@ -132,6 +132,7 @@
     .status.ok { border-color: rgba(200,241,53,0.45); color: var(--accent); }
     .status.err { border-color: rgba(255,77,77,0.45); color: var(--red); }
     .status strong { display: block; font-family: 'Syne', sans-serif; font-size: 15px; margin-bottom: 2px; }
+    .status button { display: block; width: 100%; margin-top: 12px; }
     .foot { margin-top: 22px; font-size: 11px; color: #555; display: flex; gap: 14px; }
     .foot a { color: #888; }
     .overlay[hidden] { display: none; }
@@ -179,7 +180,7 @@
   <div class="card">
     <div class="logo">Nanofactor · Asistencia</div>
     <h1>Registro<br>de entrada</h1>
-    <p class="subtitle">Ingresa tu PIN. Entrada y salida piden foto. Salida a comer y regreso no. La ubicación se guarda si el navegador la da. La misma acción no se vuelve a guardar durante un minuto.</p>
+    <p class="subtitle">Ingresa tu PIN. Entrada y salida piden foto. Salida a comer y regreso no. La ubicación es obligatoria: sin ella no se guarda la checada. La misma acción no se vuelve a guardar durante un minuto.</p>
     <div class="clock" id="clock">--:--:--</div>
     <div class="date" id="dateLine"></div>
     <div class="state" id="state">
@@ -243,7 +244,7 @@
   tick();
   setInterval(tick, 1000);
 
-  function showStatus(kind, title, detail) {
+  function showStatus(kind, title, detail, retryAction) {
     const box = $('status');
     box.className = 'status show ' + (kind === 'ok' ? 'ok' : kind === 'err' ? 'err' : '');
     box.replaceChildren();
@@ -253,6 +254,42 @@
       box.appendChild(strong);
     }
     box.appendChild(document.createTextNode(detail || ''));
+    if (retryAction) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'in';
+      btn.textContent = 'Reintentar';
+      btn.addEventListener('click', () => punch(retryAction));
+      box.appendChild(btn);
+      btn.focus();
+    }
+  }
+  function locationBlocked(err) {
+    if (!err) return false;
+    if (err.code === 'LOCATION_REQUIRED') return true;
+    const msg = String(err.message || '');
+    return /ubicaci[oó]n/i.test(msg) && /no se (registr|guard)/i.test(msg);
+  }
+  async function obtainLocation(action) {
+    showStatus('', '', 'Buscando la ubicación…');
+    const fix = await Checador.readLocation();
+    if (fix && fix.ok && fix.location) return fix.location;
+    const message = (fix && fix.message) || 'No llegó una ubicación válida. Activa la ubicación del aparato, permite que el navegador la use y pulsa Reintentar. No se guardó nada.';
+    showStatus('err', 'No se pudo checar', message, action);
+    return null;
+  }
+  function finishPunch(row, verb, extra) {
+    if (!row || row.saved_location === false) {
+      showStatus('err', 'No se pudo checar', 'No se confirmó la ubicación de esta checada. Revisa el tablero antes de volver a marcar y avisa a administración.');
+      return;
+    }
+    const when = new Date(row.marked_at);
+    const time = Number.isNaN(when.getTime())
+      ? ''
+      : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
+    showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ubicación guardada' + (extra || ''));
+    $('pin').value = '';
+    hideState();
   }
   function clearStatus() {
     $('status').className = 'status';
@@ -445,7 +482,7 @@
         try {
           choice = await choose({
             title: '¿Usamos esta foto?',
-            copy: 'Así se guarda la foto, junto con la hora y la ubicación si la hay.',
+            copy: 'Así se guarda la foto, junto con la hora y la ubicación.',
             still: true,
             onEscape: 'cancel',
             actions: [
@@ -475,20 +512,14 @@
     busy = true;
     setBusy(true);
     try {
-      showStatus('', '', 'Buscando ubicación… si no hay permiso, se guarda igual');
-      const location = await Checador.readLocation();
+      const location = await obtainLocation(action);
+      if (!location) return;
       const row = await Checador.registerAttendance({ pin, action, location });
-      const when = new Date(row.marked_at);
-      const time = Number.isNaN(when.getTime())
-        ? ''
-        : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
       const verb = action === 'lunch_out' ? 'Salida a comer registrada' : 'Regreso de comer registrado';
-      const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
-      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where);
-      $('pin').value = '';
-      hideState();
+      finishPunch(row, verb, '');
     } catch (err) {
-      showStatus('err', '', err.message || 'No se pudo registrar');
+      if (locationBlocked(err)) showStatus('err', 'No se pudo checar', err.message || 'No se guardó nada.', action);
+      else showStatus('err', '', err.message || 'No se pudo registrar');
     } finally {
       setBusy(false);
       overlay.hidden = true;
@@ -509,6 +540,9 @@
     busy = true;
     setBusy(true);
     try {
+      const location = await obtainLocation(action);
+      if (!location) return;
+
       showStatus('', '', 'Revisando el PIN…');
       const found = await Checador.verifyPin(pin);
       if (!found) throw new Error('PIN no encontrado');
@@ -543,30 +577,16 @@
         return;
       }
 
-      showStatus('', '', 'Buscando ubicación… si no hay permiso, se guarda igual');
-      const location = await Checador.readLocation();
       showStatus('', '', 'Guardando la foto…');
       const photoPath = Checador.attendancePhotoPath(found.id);
       const photoSha256 = await Checador.sha256Hex(blob);
       await Checador.uploadAttendancePhoto(photoPath, blob);
       const row = await Checador.registerAttendance({ pin, action, location, photoPath, photoSha256 });
-      const when = new Date(row.marked_at);
-      const time = Number.isNaN(when.getTime())
-        ? ''
-        : when.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Mexico_City' });
-      const verb = action === 'checkin'
-        ? 'Entrada registrada'
-        : action === 'lunch_out'
-          ? 'Salida a comer registrada'
-          : action === 'lunch_in'
-            ? 'Regreso de comer registrado'
-            : 'Salida registrada';
-      const where = row.saved_location ? 'ubicación guardada' : 'sin ubicación';
-      showStatus('ok', row.employee_name || '', verb + (time ? ' · ' + time : '') + ' · ' + where + ' · foto guardada');
-      $('pin').value = '';
-      hideState();
+      const verb = action === 'checkin' ? 'Entrada registrada' : 'Salida registrada';
+      finishPunch(row, verb, ' · foto guardada');
     } catch (err) {
-      showStatus('err', '', err.message || 'No se pudo registrar');
+      if (locationBlocked(err)) showStatus('err', 'No se pudo checar', err.message || 'No se guardó nada.', action);
+      else showStatus('err', '', err.message || 'No se pudo registrar');
     } finally {
       setBusy(false);
       overlay.hidden = true;
@@ -588,7 +608,16 @@
     if (ev.key === 'Enter') punch('checkin');
   });
   $('pin').focus();
-  Checador.readLocation();
+  Checador.readLocation({ attempts: 1 }).then((fix) => {
+    if (!fix || fix.ok) return;
+    if (fix.reason !== 'denied' && fix.reason !== 'unsupported') return;
+    const box = $('status');
+    if (box.classList.contains('show')) return;
+    const lead = fix.reason === 'unsupported'
+      ? 'Este navegador no puede compartir la ubicación. Ábrelo en Chrome o Safari y activa la ubicación.'
+      : 'El navegador bloqueó el permiso de ubicación. En la barra de direcciones, permite la ubicación para este sitio.';
+    showStatus('err', 'No se pudo checar', lead + ' Sin eso no se guarda la checada.');
+  });
 </script>
 </body>
 </html>
